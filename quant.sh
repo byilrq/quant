@@ -938,23 +938,27 @@ configure_web_portal() {
     local domain="sharq.eu.org"
     local admin_user="admin"
     local admin_pass=""
-    local admin_pass2=""
     local cert_file=""
     local key_file=""
     local cert_info=""
     local cert_name=""
 
+    # 从配置文件读取已保存的参数
+    if [ -f "$WEB_CONF_FILE" ]; then
+        domain="$(grep -oP '"domain"\s*:\s*"\K[^"]+' "$WEB_CONF_FILE" 2>/dev/null || echo "sharq.eu.org")"
+        admin_user="$(grep -oP '"admin_username"\s*:\s*"\K[^"]+' "$WEB_CONF_FILE" 2>/dev/null || echo "admin")"
+    fi
+
     echo
     echo "${C_CYAN}${C_BOLD}Web 管理端配置${C_RESET}"
-    prompt_read domain "请输入访问域名（默认 sharq.eu.org）: " "$domain"
+    prompt_read domain "请输入访问域名（默认 $domain）: " "$domain"
     domain="${domain:-sharq.eu.org}"
-    prompt_read admin_user "请输入管理账号（默认 admin）: " "$admin_user"
+    prompt_read admin_user "请输入管理账号（默认 $admin_user）: " "$admin_user"
     admin_user="${admin_user:-admin}"
     prompt_read admin_pass "请输入登录密码: " ""
-    prompt_read admin_pass2 "请再次输入登录密码: " ""
 
-    if [ -z "$admin_pass" ] || [ "$admin_pass" != "$admin_pass2" ]; then
-        echo "❌ 两次密码不一致或为空。"
+    if [ -z "$admin_pass" ]; then
+        echo "❌ 密码不能为空。"
         return 1
     fi
 
@@ -1003,6 +1007,11 @@ PY
     cert_file="$(echo "$cert_info" | cut -d'|' -f2)"
     key_file="$(echo "$cert_info" | cut -d'|' -f3)"
 
+    # 为 nginx 配置设置环境变量
+    export QUANT_DOMAIN="$domain"
+    export QUANT_CERT_FILE="$cert_file"
+    export QUANT_KEY_FILE="$key_file"
+
     echo "检查 Web 程序与模板目录..."
     if [ ! -d "$DCF_DIR/web_templates" ] || [ ! -d "$DCF_DIR/web_static" ]; then
         echo "❌ 缺少 web_templates 或 web_static 目录，请确认已复制到 $DCF_DIR"
@@ -1024,7 +1033,7 @@ Type=simple
 User=root
 WorkingDirectory=$DCF_DIR
 Environment=PYTHONUNBUFFERED=1
-ExecStart=$VENV_DIR/bin/gunicorn -w 2 -b 127.0.0.1:$WEB_INTERNAL_PORT quant_web:app
+ExecStart=$VENV_DIR/bin/python -m gunicorn -w 2 -b 127.0.0.1:$WEB_INTERNAL_PORT quant_web:app
 Restart=always
 RestartSec=3
 
@@ -1033,7 +1042,7 @@ WantedBy=multi-user.target
 SERVICE
 
     # 配置 nginx（监听 2096 端口）
-    ${SUDO} tee "$WEB_NGINX_SITE" >/dev/null <<NGINX
+    ${SUDO} tee "$WEB_NGINX_SITE" >/dev/null <<EOF
 server {
     listen $WEB_PUBLIC_PORT ssl;
     listen [::]:$WEB_PUBLIC_PORT ssl;
@@ -1050,22 +1059,21 @@ server {
 
     location / {
         proxy_pass http://127.0.0.1:$WEB_INTERNAL_PORT;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header Host \\\$host;
+        proxy_set_header X-Real-IP \\\$remote_addr;
+        proxy_set_header X-Forwarded-For \\\$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
         proxy_read_timeout 60;
     }
 }
 
-    # HTTP → HTTPS 自动跳转（端口 80 跳转到 2096）
 server {
     listen 80;
     listen [::]:80;
     server_name $domain;
-    return 301 https://$server_name:$WEB_PUBLIC_PORT$request_uri;
+    return 301 https://\\\$server_name:$WEB_PUBLIC_PORT\\\$request_uri;
 }
-NGINX
+EOF
 
     ${SUDO} ln -sf "$WEB_NGINX_SITE" "$WEB_NGINX_LINK"
     ${SUDO} nginx -t || return 1
@@ -1154,7 +1162,47 @@ web_portal_status() {
     ${SUDO} nginx -t 2>/dev/null || true
 }
 
+uninstall_quant() {
+    echo -e "${C_RED}========== 卸载 Quant 程序 ==========${C_RESET}"
+    echo -e "${C_YELLOW}警告：此操作将删除以下内容：${C_RESET}"
+    echo "  - $DCF_DIR 目录（所有程序文件、配置、日志）"
+    echo "  - /etc/systemd/system/quant-web.service"
+    echo "  - /etc/nginx/sites-available/quant-web-*.conf"
+    echo "  - /etc/nginx/sites-enabled/quant-web-*.conf"
+    echo "  - crontab 中的定时任务"
+    echo ""
+    read -p "确认卸载？(yes/no): " confirm
+    if [ "$confirm" != "yes" ]; then
+        echo "已取消卸载。"
+        return 0
+    fi
 
+    echo "正在停止服务..."
+    ${SUDO} systemctl stop quant-web 2>/dev/null || true
+    ${SUDO} systemctl stop quant 2>/dev/null || true
+
+    echo "正在删除 systemd 服务..."
+    ${SUDO} rm -f /etc/systemd/system/quant-web.service
+    ${SUDO} rm -f /etc/systemd/system/quant.service
+    ${SUDO} systemctl daemon-reload 2>/dev/null || true
+
+    echo "正在删除 nginx 配置..."
+    ${SUDO} rm -f /etc/nginx/sites-available/quant-web-*.conf
+    ${SUDO} rm -f /etc/nginx/sites-enabled/quant-web-*.conf
+    ${SUDO} nginx -t >/dev/null 2>&1 && ${SUDO} systemctl reload nginx 2>/dev/null || true
+
+    echo "正在删除 crontab 任务..."
+    crontab -l 2>/dev/null | grep -v "quant.sh --cron-check" | crontab - 2>/dev/null || true
+
+    echo "正在删除程序目录..."
+    ${SUDO} rm -rf "$DCF_DIR"
+
+    echo ""
+    echo -e "${C_GREEN}✅ Quant 程序已卸载完毕${C_RESET}"
+    echo "如需完全清理，还需手动删除："
+    echo "  - /etc/letsencrypt/live/ 中的证书（可选）"
+    echo "  - $SCRIPT_DIR/quant.sh 脚本本身（可选）"
+}
 
 
 show_menu() {
@@ -1171,7 +1219,8 @@ show_menu() {
     echo -e "${C_YELLOW}6)${C_RESET} 重启网页端"
     echo -e "${C_CYAN}7)${C_RESET} 查看网页端状态"
     echo -e "${C_CYAN}8)${C_RESET} 检查项目文件"
-    echo -e "${C_GREEN}9)${C_RESET} 域名设置（配置 HTTPS）" 
+    echo -e "${C_GREEN}9)${C_RESET} 域名设置（配置 HTTPS）"
+    echo -e "${C_RED}10)${C_RESET} 卸载程序"
     echo -e "${C_RED}0)${C_RESET} 退出"
     echo -e "${C_CYAN}===============================${C_RESET}"
 }
@@ -1190,7 +1239,8 @@ case "$choice" in
     6) restart_web_portal ;;
     7) web_portal_status ;;
     8) self_check_project_files ;;
-    9) setup_domain_https ;;   # 新增
+    9) setup_domain_https ;;
+    10) uninstall_quant ;;
     0) exit 0 ;;
     *) echo "无效选项，请重新输入。" ;;
 esac
@@ -1251,7 +1301,7 @@ setup_domain_https() {
     
     if ! nginx -T 2>/dev/null | grep -q "server_name.*$DOMAIN"; then
         echo -e "${C_YELLOW}当前 Nginx 未配置域名 $DOMAIN 的 HTTP 访问，将临时添加配置用于证书验证...${C_RESET}"
-        cat > "$temp_nginx_conf" <<NGINX_TEMP
+        cat > "$temp_nginx_conf" <<EOF_TEMP
 server {
     listen 80;
     server_name $DOMAIN;
@@ -1296,7 +1346,7 @@ NGINX_TEMP
     local nginx_conf="/etc/nginx/sites-available/quant-${DOMAIN}-ssl"
     local nginx_enabled="/etc/nginx/sites-enabled/quant-${DOMAIN}-ssl"
     
-    cat > "$nginx_conf" <<NGINX_SSL
+    cat > "$nginx_conf" <<EOF_SSL
 # HTTPS server block for $DOMAIN (port $PUBLIC_PORT)
 server {
     listen $PUBLIC_PORT ssl;
@@ -1328,7 +1378,7 @@ NGINX_SSL
         echo -e "${C_YELLOW}提示：您设置的 HTTPS 端口是 $PUBLIC_PORT，访问请使用 https://$DOMAIN:$PUBLIC_PORT${C_RESET}"
         read -p "是否同时配置标准 443 端口（需要 443 未占用）？(y/N): " add_443
         if [[ "$add_443" =~ ^[Yy]$ ]]; then
-            cat >> "$nginx_conf" <<NGINX_443
+            cat >> "$nginx_conf" <<EOF_443
 # Standard 443 port fallback
 server {
     listen 443 ssl;
