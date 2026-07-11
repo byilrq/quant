@@ -1,0 +1,9 @@
+{
+  "app_name": "闲云量化",
+  "admin_username": "admin",
+  "password": "Plex0819$",
+  "secret_key": "143e8eef250b6b63511775b34d91fd1d6cdaa81d0479e992cd866351ab207187",
+  "domain": "wow.xyrq.de",
+  "public_port": 2096,
+  "internal_port": 2097
+}

@@ -1,0 +1,2163 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{{ app_name }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='portal.css') }}">
+  <script>
+    (function(){
+      try{
+        var theme = localStorage.getItem('quant_dashboard_theme') || 'dark';
+        document.documentElement.setAttribute('data-quant-theme', theme);
+      }catch(e){
+        document.documentElement.setAttribute('data-quant-theme', 'dark');
+      }
+    })();
+  </script>
+  <style>
+    .topbar h1{margin-bottom:6px;}
+    .symbol-subtitle{margin:0;color:rgba(235,245,255,.68);font-size:14px;line-height:1.5;letter-spacing:.2px;}
+    .topbar-right{align-self:center;}
+    .current-chip{display:none !important;}
+    .page-nav{
+      position:static !important;
+      top:auto !important;
+      bottom:auto !important;
+      left:auto !important;
+      right:auto !important;
+      transform:none !important;
+      z-index:auto !important;
+      width:min(100%, 760px);
+      margin:18px auto 20px;
+      padding:10px;
+      display:grid;
+      grid-template-columns:repeat(5,minmax(0,1fr));
+      justify-content:center;
+      align-items:center;
+      gap:10px;
+      border-radius:22px;
+      background:linear-gradient(135deg, rgba(42,80,116,.30), rgba(32,100,120,.22));
+      border:1px solid rgba(255,255,255,.16);
+      box-shadow:0 10px 24px rgba(0,0,0,.10), inset 0 1px 0 rgba(255,255,255,.12);
+      backdrop-filter:blur(18px) saturate(125%);
+      -webkit-backdrop-filter:blur(18px) saturate(125%);
+      box-sizing:border-box;
+    }
+    .page-nav-link{
+      width:100%;
+      min-width:0;
+      min-height:42px;
+      padding:9px 12px;
+      font-size:15px;
+      line-height:1.2;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      box-sizing:border-box;
+      white-space:nowrap;
+    }
+    .action-btn,
+    .artifact-btn{
+      min-height:44px;
+      padding:10px 18px;
+      font-size:15px;
+      line-height:1.2;
+      box-sizing:border-box;
+    }
+    .section-note{margin:4px 0 0;color:rgba(235,245,255,.58);font-size:13px;line-height:1.5;}
+
+    .snapshot-toolbar{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin:16px 0 12px;}
+    .snapshot-date-form{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+    .snapshot-date-form label{color:rgba(235,245,255,.72);font-size:14px;}
+    .snapshot-date-form select{min-height:38px;border-radius:12px;padding:6px 10px;}
+    .snapshot-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:12px 0;}
+    .snapshot-kv{border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);border-radius:14px;padding:10px 12px;}
+    .snapshot-kv .k{font-size:12px;color:rgba(235,245,255,.58);margin-bottom:4px;}
+    .snapshot-kv .v{font-size:15px;color:rgba(255,255,255,.92);word-break:break-word;overflow-wrap:anywhere;white-space:normal;}
+    .snapshot-table-wrap{overflow-x:auto;margin-top:12px;}
+    .snapshot-table{width:100%;border-collapse:collapse;min-width:720px;font-size:13px;}
+    .snapshot-table th,.snapshot-table td{padding:9px 10px;border-bottom:1px solid rgba(255,255,255,.10);text-align:left;white-space:nowrap;}
+    .snapshot-table td.reason-cell{white-space:normal;word-break:break-word;overflow-wrap:anywhere;max-width:360px;min-width:220px;}
+    .snapshot-table th{color:rgba(235,245,255,.62);font-weight:600;}
+    .snapshot-empty{color:rgba(235,245,255,.58);font-size:14px;margin:10px 0 0;}
+.snapshot-reason-card{margin-top:12px;border:1px solid rgba(255,255,255,.12);border-radius:16px;background:rgba(255,255,255,.055);padding:14px 16px;line-height:1.75;font-size:15px;color:rgba(255,255,255,.92);white-space:normal;word-break:break-word;overflow-wrap:anywhere;}
+.status-control-row{display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin:0 0 16px;}
+.status-control-row .field-block{min-width:260px;flex:1 1 320px;}
+.status-control-row form{display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin:0;}
+.reference-price-grid,.source-metric-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:14px;}
+.reference-price-card,.source-metric-card{border:1px solid rgba(255,255,255,.12);border-radius:14px;background:rgba(255,255,255,.055);padding:11px 12px;}
+.reference-price-card.primary{border-color:rgba(90,200,255,.42);background:rgba(90,200,255,.10);}
+.reference-price-card.error,.source-metric-card.error{border-color:rgba(255,120,120,.28);background:rgba(255,80,80,.07);}
+.reference-price-card .name,.source-metric-card .name{font-size:13px;color:rgba(235,245,255,.70);display:flex;gap:8px;align-items:center;margin-bottom:5px;}
+.mini-btn{min-height:26px;padding:4px 9px;font-size:12px;border-radius:9px;}
+.reference-price-card .price,.source-metric-card .price{font-size:20px;font-weight:800;color:rgba(255,255,255,.94);}
+.reference-price-card .meta,.source-metric-card .meta{margin-top:5px;font-size:12px;color:rgba(235,245,255,.55);word-break:break-all;}
+.source-metric-card .metric-line{margin-top:5px;font-size:13px;color:rgba(235,245,255,.78);line-height:1.45;}
+.status-action-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+.status-action-row form{margin:0;}
+.status-action-row .action-btn{min-width:64px;padding-left:14px;padding-right:14px;}
+.source-chip{font-size:11px;padding:2px 6px;border-radius:999px;background:rgba(90,200,255,.18);color:#bdefff;}
+    details.snapshot-details{margin-top:14px;border:1px solid rgba(255,255,255,.12);border-radius:16px;background:rgba(255,255,255,.045);padding:10px 12px;}
+    details.snapshot-details > summary{cursor:pointer;color:rgba(255,255,255,.88);font-weight:700;}
+    .rollback-note{color:rgba(255,220,180,.82);font-size:13px;line-height:1.6;margin:8px 0 0;}
+    .rollback-btn{border:1px solid rgba(255,190,90,.36);background:rgba(255,160,40,.14);color:#ffe4b8;border-radius:10px;padding:7px 10px;cursor:pointer;white-space:nowrap;}
+    .rollback-btn:hover{background:rgba(255,160,40,.22);}
+    @media (max-width: 640px){.snapshot-grid{grid-template-columns:repeat(2,minmax(0,1fr));}.snapshot-kv{padding:9px 10px;}.snapshot-reason-card{margin-left:-2px;margin-right:-2px;padding:13px 14px;font-size:14px;line-height:1.8;}.reference-price-grid,.source-metric-grid{grid-template-columns:1fr;}}
+    @media (max-width: 640px){
+      .topbar{padding-bottom:18px;}
+      .topbar h1{font-size:30px;line-height:1.12;}
+      .symbol-subtitle{font-size:13px;}
+      .page-nav{
+        width:calc(100% - 20px);
+        margin:14px auto 18px;
+        padding:8px;
+        gap:6px;
+        border-radius:18px;
+        grid-template-columns:repeat(5,minmax(0,1fr));
+      }
+      .page-nav-link{
+        min-height:38px;
+        padding:8px 5px;
+        font-size:14px;
+        border-radius:13px;
+        text-align:center;
+      }
+      .artifact-row{display:flex;flex-wrap:wrap;gap:10px;}
+      .action-btn,
+      .artifact-btn{width:auto;}
+    }
+    @media (max-width: 360px){
+      .page-nav{width:calc(100% - 12px);padding:6px;gap:5px;}
+      .page-nav-link{font-size:12px;min-height:34px;padding-left:2px;padding-right:2px;}
+    }
+
+    /* === refined topbar and symbol page fixes === */
+    .topbar{
+      width:min(100% - 40px, 960px);
+      margin:18px auto 0;
+      padding:16px 20px;
+      display:flex !important;
+      align-items:center !important;
+      justify-content:space-between !important;
+      gap:14px;
+      border-radius:24px;
+      background:linear-gradient(135deg, rgba(56,92,128,.34), rgba(36,110,130,.24)) !important;
+      border:1px solid rgba(255,255,255,.18);
+      box-shadow:0 12px 30px rgba(0,0,0,.11), inset 0 1px 0 rgba(255,255,255,.14);
+      backdrop-filter:blur(20px) saturate(128%);
+      -webkit-backdrop-filter:blur(20px) saturate(128%);
+      box-sizing:border-box;
+    }
+
+    .topbar::before{
+      content:"";
+      position:absolute;
+      inset:0;
+      border-radius:inherit;
+      background:radial-gradient(circle at 18% 0%, rgba(255,255,255,.16), transparent 36%), linear-gradient(180deg, rgba(255,255,255,.075), transparent 66%);
+      pointer-events:none;
+    }
+    .topbar{position:relative;overflow:hidden;}
+    .topbar-brand,.topbar-right{position:relative;z-index:1;}
+    .topbar-brand{
+      min-width:0;
+      flex:1 1 auto;
+      display:flex;
+      align-items:center;
+      gap:12px;
+    }
+    .topbar-logo{
+      width:46px;
+      height:46px;
+      flex:0 0 46px;
+      object-fit:contain;
+      border-radius:50%;
+      background:rgba(255,255,255,.12);
+      border:1px solid rgba(255,255,255,.20);
+      box-shadow:0 8px 18px rgba(0,0,0,.10), inset 0 1px 0 rgba(255,255,255,.18);
+      backdrop-filter:blur(10px);
+      -webkit-backdrop-filter:blur(10px);
+      padding:5px;
+      box-sizing:border-box;
+    }
+    .topbar-title-wrap{min-width:0;}
+    .topbar h1{
+      margin:0 !important;
+      font-size:30px;
+      line-height:1.12;
+      letter-spacing:.7px;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .symbol-subtitle{display:none !important;}
+    .topbar-right{
+      flex:0 0 auto;
+      margin-left:auto !important;
+      display:flex;
+      align-items:center;
+      justify-content:flex-end;
+    }
+    .logout-btn{
+      flex:0 0 auto;
+      white-space:nowrap;
+      text-align:center;
+    }
+    .symbols-current-card .section-header{
+      margin-bottom:14px;
+    }
+    .symbols-current-card .section-header h2{
+      margin:0;
+    }
+    .symbol-select-field > label{
+      position:absolute;
+      width:1px;
+      height:1px;
+      padding:0;
+      margin:-1px;
+      overflow:hidden;
+      clip:rect(0,0,0,0);
+      white-space:nowrap;
+      border:0;
+    }
+    .symbols-current-card .selected-symbol-select{
+      background-image:none !important;
+      text-shadow:none !important;
+    }
+
+    @media (max-width: 640px){
+      .topbar{
+        width:calc(100% - 24px);
+        margin-top:12px;
+        padding:13px 14px;
+        border-radius:21px;
+        box-shadow:0 10px 24px rgba(0,0,0,.10), inset 0 1px 0 rgba(255,255,255,.14);
+        flex-direction:row !important;
+      }
+      .topbar-brand{gap:10px;min-width:0;}
+      .topbar-logo{
+        width:40px;
+        height:40px;
+        flex-basis:40px;
+        border-radius:50%;
+        padding:4px;
+      }
+      .topbar h1{
+        font-size:24px !important;
+        max-width:calc(100vw - 172px);
+      }
+      .topbar-right{
+        margin-left:auto !important;
+        align-self:center !important;
+        justify-content:flex-end !important;
+      }
+      .logout-btn{
+        min-height:38px;
+        padding:8px 14px !important;
+        border-radius:14px;
+        font-size:14px;
+      }
+      .page-nav{
+        width:calc(100% - 12px) !important;
+      }
+      .symbol-switcher-row{
+        align-items:center;
+        gap:8px;
+      }
+      .symbol-switcher-row .grow{
+        min-width:100%;
+      }
+      .symbol-switcher-row .action-btn{
+        flex:0 0 auto;
+        width:auto !important;
+        min-width:70px;
+        min-height:40px;
+        padding:9px 14px;
+        border-radius:12px;
+      }
+    }
+    @media (max-width: 360px){
+      .topbar{width:calc(100% - 18px);padding:12px 12px;}
+      .topbar-logo{width:38px;height:38px;flex-basis:38px;}
+      .topbar h1{font-size:22px !important;max-width:calc(100vw - 158px);}
+      .logout-btn{padding-left:12px !important;padding-right:12px !important;}
+    }
+
+    /* === non-floating soft glass overrides === */
+    .page-nav{
+      position:static !important;
+      inset:auto !important;
+      transform:none !important;
+      z-index:auto !important;
+      background:linear-gradient(135deg, rgba(54,92,128,.28), rgba(36,102,124,.20)) !important;
+      border-color:rgba(255,255,255,.16) !important;
+      box-shadow:0 10px 24px rgba(0,0,0,.10), inset 0 1px 0 rgba(255,255,255,.12) !important;
+      backdrop-filter:blur(18px) saturate(125%) !important;
+      -webkit-backdrop-filter:blur(18px) saturate(125%) !important;
+    }
+    .topbar{
+      background:linear-gradient(135deg, rgba(58,94,130,.34), rgba(38,108,128,.24)) !important;
+      border-color:rgba(255,255,255,.18) !important;
+      box-shadow:0 12px 30px rgba(0,0,0,.11), inset 0 1px 0 rgba(255,255,255,.14) !important;
+      backdrop-filter:blur(20px) saturate(128%) !important;
+      -webkit-backdrop-filter:blur(20px) saturate(128%) !important;
+    }
+    .topbar-logo{border-radius:50% !important;}
+
+    /* === backtest return help === */
+    .backtest-run-actions{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      flex-wrap:wrap;
+      margin-top:2px;
+    }
+    .backtest-run-help-btn{
+      width:34px;
+      height:34px;
+      min-width:34px;
+      min-height:34px;
+      padding:0;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      border-radius:50%;
+      border:1px solid rgba(255,255,255,.24);
+      background:linear-gradient(135deg, rgba(255,255,255,.18), rgba(255,255,255,.07));
+      color:rgba(245,250,255,.95);
+      font-weight:800;
+      font-size:16px;
+      line-height:1;
+      cursor:pointer;
+      box-shadow:0 8px 18px rgba(0,0,0,.10), inset 0 1px 0 rgba(255,255,255,.16);
+      backdrop-filter:blur(14px) saturate(130%);
+      -webkit-backdrop-filter:blur(14px) saturate(130%);
+    }
+    .backtest-run-help-btn:hover,
+    .backtest-run-help-btn:active{
+      background:linear-gradient(135deg, rgba(47,214,190,.28), rgba(80,145,255,.12));
+      border-color:rgba(115,235,220,.38);
+    }
+    .return-help-panel{
+      margin:12px 0 0;
+      padding:15px 16px;
+      border-radius:18px;
+      border:1px solid rgba(255,255,255,.16);
+      background:linear-gradient(135deg, rgba(18,48,76,.54), rgba(22,76,92,.36));
+      box-shadow:0 14px 28px rgba(0,0,0,.12), inset 0 1px 0 rgba(255,255,255,.10);
+      backdrop-filter:blur(18px) saturate(125%);
+      -webkit-backdrop-filter:blur(18px) saturate(125%);
+      color:rgba(240,248,255,.90);
+      font-size:13px;
+      line-height:1.72;
+    }
+    .return-help-panel h3{
+      margin:0 0 8px;
+      font-size:15px;
+      line-height:1.4;
+      color:rgba(255,255,255,.96);
+    }
+    .return-help-panel h4{
+      margin:12px 0 6px;
+      font-size:13px;
+      color:rgba(199,244,238,.96);
+    }
+    .return-help-panel ul{
+      margin:0;
+      padding-left:1.2em;
+    }
+    .return-help-panel li{
+      margin:3px 0;
+    }
+    .return-help-panel code{
+      padding:1px 5px;
+      border-radius:7px;
+      background:rgba(255,255,255,.09);
+      color:rgba(255,255,255,.96);
+      font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size:.94em;
+    }
+    .hidden{display:none !important;}
+    @media (max-width:640px){
+      .backtest-run-actions{
+        gap:8px;
+      }
+      .backtest-run-actions .primary-btn{
+        flex:1 1 auto;
+      }
+      .backtest-run-help-btn{
+        width:32px;
+        height:32px;
+        min-width:32px;
+        min-height:32px;
+        font-size:15px;
+      }
+      .return-help-panel{
+        padding:13px 14px;
+        border-radius:16px;
+        font-size:12.5px;
+      }
+    }
+
+    /* === x3-ui inspired dark theme === */
+    body.theme-x3-dark{background:linear-gradient(180deg,#0b1322 0%,#0b1220 48%,#09101d 100%) !important;color:#d9e2ef;}
+    body.theme-x3-dark::before{content:"";position:fixed;inset:0;pointer-events:none;background:radial-gradient(circle at 18% 4%, rgba(20,184,166,.10), transparent 32%),radial-gradient(circle at 84% 10%, rgba(45,91,150,.13), transparent 34%),linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px),linear-gradient(180deg, rgba(255,255,255,.014) 1px, transparent 1px);background-size:auto,auto,44px 44px,44px 44px;opacity:.95;z-index:-1;}
+    body.theme-x3-dark .page-wrap{color:#d9e2ef;}
+    body.theme-x3-dark .topbar{background:linear-gradient(135deg, rgba(24,35,54,.88), rgba(17,41,58,.78)) !important;border-color:rgba(113,134,166,.26) !important;box-shadow:0 22px 55px rgba(0,0,0,.26), inset 0 1px 0 rgba(255,255,255,.08) !important;}
+    body.theme-x3-dark .topbar::before{background:radial-gradient(circle at 16% 0%, rgba(76,118,164,.20), transparent 36%),radial-gradient(circle at 88% 12%, rgba(20,184,166,.10), transparent 34%),linear-gradient(180deg, rgba(255,255,255,.055), transparent 70%);}
+    body.theme-x3-dark .topbar-logo{background:rgba(8,18,31,.44) !important;border-color:rgba(148,163,184,.26) !important;box-shadow:0 10px 24px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.10) !important;}
+    body.theme-x3-dark .card,body.theme-x3-dark .page-card,body.theme-x3-dark .symbols-current-card{background:linear-gradient(180deg, rgba(22,33,52,.88), rgba(17,29,46,.82)) !important;border:1px solid rgba(91,113,143,.25) !important;box-shadow:0 18px 44px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.055) !important;backdrop-filter:blur(18px) saturate(118%) !important;-webkit-backdrop-filter:blur(18px) saturate(118%) !important;}
+    body.theme-x3-dark .section-header{border-color:rgba(103,125,155,.22) !important;}
+    body.theme-x3-dark .page-nav{background:linear-gradient(135deg, rgba(20,32,50,.82), rgba(13,58,61,.62)) !important;border-color:rgba(103,125,155,.25) !important;box-shadow:0 16px 34px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.07) !important;}
+    body.theme-x3-dark .page-nav-link{color:rgba(220,230,242,.78) !important;border:1px solid rgba(148,163,184,.12);background:rgba(255,255,255,.025);}
+    body.theme-x3-dark .page-nav-link.active,body.theme-x3-dark .page-nav-link:hover{color:#ecfeff !important;background:linear-gradient(135deg, rgba(0,137,112,.82), rgba(6,118,104,.72)) !important;border-color:rgba(45,212,191,.38) !important;box-shadow:0 10px 24px rgba(5,150,125,.18), inset 0 1px 0 rgba(255,255,255,.12) !important;}
+    body.theme-x3-dark input,body.theme-x3-dark select,body.theme-x3-dark textarea{background:rgba(8,16,29,.52) !important;border-color:rgba(103,125,155,.28) !important;color:#e5edf7 !important;box-shadow:inset 0 1px 0 rgba(255,255,255,.04) !important;}
+    body.theme-x3-dark input::placeholder,body.theme-x3-dark textarea::placeholder{color:rgba(203,213,225,.45) !important;}
+    body.theme-x3-dark .primary-btn,body.theme-x3-dark .action-btn.primary-btn{background:linear-gradient(135deg,#07806b,#059669) !important;color:#ecfeff !important;border-color:rgba(45,212,191,.40) !important;box-shadow:0 12px 28px rgba(5,150,105,.20), inset 0 1px 0 rgba(255,255,255,.13) !important;}
+    body.theme-x3-dark .artifact-btn,body.theme-x3-dark .logout-btn{background:rgba(255,255,255,.055) !important;border-color:rgba(148,163,184,.24) !important;color:rgba(235,245,255,.90) !important;box-shadow:inset 0 1px 0 rgba(255,255,255,.08) !important;}
+    body.theme-x3-dark .summary-line{background:rgba(8,16,29,.38) !important;border-color:rgba(103,125,155,.20) !important;}
+    body.theme-x3-dark .summary-label{color:rgba(203,213,225,.76) !important;}
+    body.theme-x3-dark .summary-value{color:#eaf2ff !important;}
+    body.theme-x3-dark .summary-value.negative-value{color:#fca5a5 !important;}
+    .help-btn.large,.help-btn.return-help-style,.backtest-run-help-btn{width:34px !important;height:34px !important;min-width:34px !important;min-height:34px !important;padding:0 !important;display:inline-flex !important;align-items:center !important;justify-content:center !important;border-radius:50% !important;border:1px solid rgba(45,212,191,.34) !important;background:linear-gradient(135deg, rgba(15,118,110,.42), rgba(30,41,59,.44)) !important;color:rgba(236,254,255,.96) !important;font-weight:800 !important;font-size:16px !important;line-height:1 !important;cursor:pointer !important;box-shadow:0 10px 22px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.12) !important;backdrop-filter:blur(14px) saturate(130%) !important;-webkit-backdrop-filter:blur(14px) saturate(130%) !important;}
+    .help-btn.large:hover,.help-btn.return-help-style:hover,.backtest-run-help-btn:hover{background:linear-gradient(135deg, rgba(13,148,136,.70), rgba(37,99,235,.22)) !important;border-color:rgba(94,234,212,.52) !important;}
+    .help-panel,.return-help-panel{border-color:rgba(91,113,143,.26) !important;background:linear-gradient(180deg, rgba(18,31,49,.92), rgba(12,27,43,.86)) !important;color:rgba(226,236,248,.92) !important;box-shadow:0 18px 40px rgba(0,0,0,.24), inset 0 1px 0 rgba(255,255,255,.06) !important;}
+    .return-help-panel h3,.return-help-panel h4{color:#ccfbf1 !important;}
+    .return-help-panel code{background:rgba(8,16,29,.58) !important;color:#e0f2fe !important;}
+    @media (max-width:640px){.help-btn.large,.help-btn.return-help-style,.backtest-run-help-btn{width:32px !important;height:32px !important;min-width:32px !important;min-height:32px !important;font-size:15px !important;}}
+
+
+
+    /* === refined light/dark theme switch and readable panels === */
+    .topbar-right{gap:10px;}
+    .theme-switch{position:relative;z-index:2;display:inline-flex;align-items:center;gap:8px;min-height:38px;padding:6px 8px 6px 10px;border-radius:999px;border:1px solid rgba(148,163,184,.22);background:rgba(255,255,255,.055);box-shadow:inset 0 1px 0 rgba(255,255,255,.08);backdrop-filter:blur(12px) saturate(125%);-webkit-backdrop-filter:blur(12px) saturate(125%);cursor:pointer;user-select:none;white-space:nowrap;}
+    .theme-switch-label{font-size:13px;font-weight:700;color:rgba(226,236,248,.84);letter-spacing:.2px;}
+    .theme-switch input{position:absolute;opacity:0;pointer-events:none;}
+    .theme-slider{position:relative;width:44px;height:24px;border-radius:999px;background:rgba(15,23,42,.45);border:1px solid rgba(148,163,184,.28);box-shadow:inset 0 1px 4px rgba(0,0,0,.28);transition:background .2s ease,border-color .2s ease;}
+    .theme-slider::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:linear-gradient(180deg,#ffffff,#cbd5e1);box-shadow:0 2px 8px rgba(0,0,0,.30);transition:transform .22s ease,background .2s ease;}
+    #theme-toggle:checked + .theme-slider{background:linear-gradient(135deg,#047857,#0f766e);border-color:rgba(94,234,212,.48);}
+    #theme-toggle:checked + .theme-slider::after{transform:translateX(20px);background:linear-gradient(180deg,#ecfeff,#99f6e4);}
+
+    /* Light theme visual overrides are fully delegated to light_skin.css.
+       Inline rules below only cover dark theme (theme-x3-dark) overrides. */
+
+    body.theme-x3-dark .status-box,body.theme-x3-dark .output-box{background:rgba(8,16,29,.64) !important;border:1px solid rgba(103,125,155,.26) !important;box-shadow:inset 0 1px 0 rgba(255,255,255,.05), 0 12px 28px rgba(0,0,0,.18) !important;}
+    body.theme-x3-dark .status-box pre,body.theme-x3-dark .output-box pre,body.theme-x3-dark .help-panel pre{color:#dbeafe !important;text-shadow:none !important;opacity:1 !important;}
+    body.theme-x3-dark .raw-output.backtest-output-toggle{background:transparent !important;border:0 !important;box-shadow:none !important;}
+    body.theme-x3-dark .raw-output.backtest-output-toggle > summary{background:linear-gradient(135deg, rgba(24,35,54,.88), rgba(17,41,58,.78)) !important;border:1px solid rgba(103,125,155,.26) !important;color:#dbeafe !important;border-radius:999px !important;padding:9px 14px !important;display:inline-flex !important;align-items:center !important;gap:8px !important;cursor:pointer !important;font-weight:700 !important;font-size:13px !important;box-shadow:0 8px 18px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.06) !important;}
+    body.theme-x3-dark .backtest-output-toggle .output-box{margin-top:10px !important;}
+    body.theme-x3-dark .selected-symbol-select{background:rgba(8,16,29,.52) !important;border-color:rgba(103,125,155,.28) !important;color:#e5edf7 !important;}
+    body.theme-x3-dark .selected-symbol-pending{background:linear-gradient(135deg, rgba(180,83,9,.26), rgba(15,23,42,.58)) !important;border-color:rgba(251,191,36,.48) !important;color:#fffbeb !important;}
+
+    .backtest-run-actions{display:grid !important;grid-template-columns:auto 1fr auto;align-items:center;width:100%;gap:10px;}
+    .backtest-run-actions .primary-btn{grid-column:1;justify-self:start;}
+    .backtest-run-actions .backtest-run-help-btn{grid-column:3;justify-self:end;margin-left:auto;}
+    .raw-head{display:flex !important;align-items:center !important;justify-content:space-between !important;gap:12px;}
+    .help-btn.large,.help-btn.return-help-style,.backtest-run-help-btn{width:34px !important;height:34px !important;min-width:34px !important;min-height:34px !important;padding:0 !important;display:inline-flex !important;align-items:center !important;justify-content:center !important;border-radius:50% !important;font-weight:800 !important;font-size:16px !important;line-height:1 !important;}
+    body:not(.theme-x3-dark) .help-btn.large,body:not(.theme-x3-dark) .help-btn.return-help-style,body:not(.theme-x3-dark) .backtest-run-help-btn{background:rgba(255,252,244,.82) !important;color:#7a5418 !important;border:1px solid rgba(176,132,40,.30) !important;box-shadow:0 8px 18px rgba(15,23,42,.07), inset 0 1px 0 rgba(255,255,255,.80) !important;}
+    body.theme-x3-dark .help-btn.large,body.theme-x3-dark .help-btn.return-help-style,body.theme-x3-dark .backtest-run-help-btn{background:linear-gradient(135deg, rgba(15,118,110,.42), rgba(30,41,59,.44)) !important;color:rgba(236,254,255,.96) !important;border:1px solid rgba(45,212,191,.34) !important;box-shadow:0 10px 22px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.12) !important;}
+    /* 回测页展开/收起说明面板：亮色主题也沿用暗色主题面板质感 */
+    body:not(.theme-x3-dark) .return-help-panel,
+    body:not(.theme-x3-dark) .help-panel{
+      background:linear-gradient(180deg, rgba(18,31,49,.94), rgba(12,27,43,.88)) !important;
+      color:rgba(226,236,248,.94) !important;
+      border:1px solid rgba(91,113,143,.28) !important;
+      box-shadow:0 18px 40px rgba(15,23,42,.18), inset 0 1px 0 rgba(255,255,255,.07) !important;
+    }
+    body:not(.theme-x3-dark) .return-help-panel h3,
+    body:not(.theme-x3-dark) .return-help-panel h4{color:#ccfbf1 !important;}
+    body:not(.theme-x3-dark) .return-help-panel code{background:rgba(8,16,29,.58) !important;color:#e0f2fe !important;}
+    body:not(.theme-x3-dark) .help-panel pre{color:#e5edf7 !important;}
+    @media (max-width:640px){.theme-switch-label{display:none}.theme-switch{padding:6px}.theme-slider{width:42px}.backtest-run-actions{grid-template-columns:1fr auto}.backtest-run-actions .primary-btn{grid-column:1}.backtest-run-actions .backtest-run-help-btn{grid-column:2}}
+
+
+
+
+    /* === dark-theme readable text blocks === */
+    body.theme-x3-dark .status-box,
+    body.theme-x3-dark .output-box,
+    body.theme-x3-dark .raw-output,
+    body.theme-x3-dark .raw-output pre,
+    body.theme-x3-dark .status-box pre,
+    body.theme-x3-dark .output-box pre {
+      color:#e5edf7 !important;
+      opacity:1 !important;
+      text-shadow:none !important;
+    }
+    body.theme-x3-dark .status-box *,
+    body.theme-x3-dark .output-box * {
+      color:inherit;
+      opacity:1;
+    }
+
+    /* === dark-theme native select dropdown readability fix === */
+    body.theme-x3-dark select option,
+    body.theme-x3-dark select optgroup {
+      background-color:#0f1b2d !important;
+      color:#eaf2ff !important;
+    }
+    body.theme-x3-dark select option:checked {
+      background:linear-gradient(135deg,#047857,#0f766e) !important;
+      background-color:#047857 !important;
+      color:#ffffff !important;
+      font-weight:800 !important;
+    }
+    body.theme-x3-dark select option:hover {
+      background-color:#12314a !important;
+      color:#ffffff !important;
+    }
+    body.theme-x3-dark .symbols-current-card .selected-symbol-select {
+      background-color:#0b1b2d !important;
+      color:#f0fdfa !important;
+      caret-color:#99f6e4 !important;
+    }
+
+    /* === stronger light-theme selected symbol contrast === */
+
+
+    /* === push config page === */
+    .push-config-layout{display:block;}
+    .push-config-grid{display:grid;grid-template-columns:1fr;gap:14px;}
+    .push-field-row{display:grid;grid-template-columns:220px minmax(0,1fr);gap:14px;align-items:start;padding:14px 0;border-bottom:1px solid rgba(148,163,184,.16);}
+    .push-field-row:last-child{border-bottom:0;}
+    .push-field-help{margin:5px 0 0;font-size:13px;line-height:1.5;color:rgba(203,213,225,.68);}
+    .push-field-row input[readonly],.push-field-row select:disabled{opacity:.76;cursor:not-allowed;background:rgba(148,163,184,.12) !important;color:rgba(226,236,248,.72) !important;}
+    body:not(.theme-x3-dark) .push-field-row input[readonly],body:not(.theme-x3-dark) .push-field-row select:disabled{background:rgba(15,23,42,.06) !important;color:#64748b !important;}
+    .push-field-telegram_bot_token input{width:100%;max-width:560px;}
+    .push-field-telegram_chat_id input{width:100%;max-width:260px;}
+    .push-field-gotify_url input{width:100%;max-width:560px;}
+    .push-field-gotify_token input{width:100%;max-width:560px;}
+    .push-field-gotify_priority input{width:120px;}
+    .push-field-ntfy_url input{width:100%;max-width:560px;}
+    .push-field-ntfy_topic input{width:100%;max-width:320px;}
+    .push-field-ntfy_username input{width:100%;max-width:260px;}
+    .push-field-ntfy_password input{width:100%;max-width:360px;}
+    .push-field-ntfy_priority input{width:120px;}
+    .push-field-ntfy_tags input{width:100%;max-width:420px;}
+    .push-field-pushplus_token input{width:100%;max-width:560px;}
+    .push-field-row.channel-hidden{display:none !important;}
+    .push-action-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:18px;}
+    .push-test-inline{display:inline-flex;margin:0;}
+    .push-log-card{margin-top:18px;}
+    .push-log-actions{display:inline-flex;align-items:center;gap:10px;flex-wrap:nowrap;}
+    .push-log-actions form{margin:0;display:inline-flex;}
+    .push-log-list{display:grid;gap:8px;margin-top:12px;min-width:0;max-width:100%;}
+    .push-log-item{padding:10px 12px;border-radius:14px;background:rgba(255,255,255,.05);border:1px solid rgba(148,163,184,.14);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.55;box-sizing:border-box;min-width:0;max-width:100%;overflow:hidden;}
+    .push-log-summary-row{display:flex;align-items:center;justify-content:space-between;gap:10px;min-width:0;max-width:100%;}
+    .push-log-summary-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .push-log-view-btn{border:1px solid rgba(99,102,241,.35);background:rgba(99,102,241,.12);color:#c7d2fe;border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer;white-space:nowrap;flex:0 0 auto;}
+    body:not(.theme-x3-dark) .push-log-view-btn{background:rgba(79,70,229,.08);color:#4338ca;border-color:rgba(79,70,229,.24);}
+    .push-log-clear-btn{border:1px solid rgba(248,113,113,.35);background:rgba(248,113,113,.10);color:#fecaca;border-radius:999px;padding:7px 12px;font-size:13px;font-weight:800;cursor:pointer;white-space:nowrap;}
+    body:not(.theme-x3-dark) .push-log-clear-btn{background:rgba(220,38,38,.06);color:#b91c1c;border-color:rgba(220,38,38,.22);}
+    .push-log-detail{display:block;margin:10px 0 0;padding:12px;border-radius:12px;background:rgba(15,23,42,.38);border:1px solid rgba(148,163,184,.14);white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;max-width:100%;max-height:420px;overflow:auto;box-sizing:border-box;}
+    body:not(.theme-x3-dark) .push-log-detail{background:rgba(15,23,42,.045);border-color:rgba(15,23,42,.08);color:#334155;}
+    .strategy-settings-card{margin-top:18px;}
+    .push-log-empty{margin-top:12px;color:rgba(203,213,225,.70);}
+    .backtest-initial-note{margin:7px 0 0;font-size:12.5px;line-height:1.45;color:rgba(203,213,225,.68);}
+    body:not(.theme-x3-dark) .backtest-initial-note{color:#64748b;}
+    .panel-toggle{display:inline-flex;align-items:center;gap:9px;cursor:pointer;user-select:none;white-space:nowrap;}
+    .panel-toggle input{position:absolute;opacity:0;pointer-events:none;}
+    .panel-toggle-text{font-size:13px;font-weight:800;color:rgba(226,236,248,.82);}
+    .panel-toggle-slider{position:relative;width:44px;height:24px;border-radius:999px;background:rgba(15,23,42,.45);border:1px solid rgba(148,163,184,.28);box-shadow:inset 0 1px 4px rgba(0,0,0,.28);}
+    .panel-toggle-slider::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:linear-gradient(180deg,#ffffff,#cbd5e1);box-shadow:0 2px 8px rgba(0,0,0,.30);transition:transform .22s ease;}
+    .panel-toggle input:checked + .panel-toggle-slider{background:linear-gradient(135deg,#047857,#0f766e);border-color:rgba(94,234,212,.48);}
+    .panel-toggle input:checked + .panel-toggle-slider::after{transform:translateX(20px);}
+    .push-enable-switch{justify-content:flex-start;}
+    .push-enable-switch .panel-toggle-text{font-size:14px;}
+
+    /* 策略运行开关 - 完全复用主题开关样式 */
+    .strategy-switch{position:relative;z-index:2;display:inline-flex;align-items:center;gap:8px;min-height:38px;padding:6px 8px 6px 10px;border-radius:999px;border:1px solid rgba(148,163,184,.22);background:rgba(255,255,255,.055);box-shadow:inset 0 1px 0 rgba(255,255,255,.08);backdrop-filter:blur(12px) saturate(125%);-webkit-backdrop-filter:blur(12px) saturate(125%);cursor:pointer;user-select:none;white-space:nowrap;}
+    .strategy-switch-label{font-size:13px;font-weight:700;color:rgba(226,236,248,.84);letter-spacing:.2px;}
+    .strategy-switch input{position:absolute;opacity:0;pointer-events:none;}
+    .strategy-slider{position:relative;width:44px;height:24px;border-radius:999px;background:rgba(15,23,42,.45);border:1px solid rgba(148,163,184,.28);box-shadow:inset 0 1px 4px rgba(0,0,0,.28);transition:background .2s ease,border-color .2s ease;}
+    .strategy-slider::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:linear-gradient(180deg,#ffffff,#cbd5e1);box-shadow:0 2px 8px rgba(0,0,0,.30);transition:transform .22s ease,background .2s ease;}
+    .strategy-switch input:checked + .strategy-slider{background:linear-gradient(135deg,#047857,#0f766e);border-color:rgba(94,234,212,.48);}
+    .strategy-switch input:checked + .strategy-slider::after{transform:translateX(20px);background:linear-gradient(180deg,#ecfeff,#99f6e4);}
+    body:not(.theme-x3-dark) .strategy-switch{background:rgba(15,23,42,.035);border-color:rgba(15,23,42,.10);box-shadow:inset 0 1px 0 rgba(255,255,255,.72);}
+    body:not(.theme-x3-dark) .strategy-switch-label{color:rgba(51,65,85,.82);}
+    body:not(.theme-x3-dark) .strategy-slider{background:#e5e7eb;border-color:rgba(15,23,42,.12);box-shadow:inset 0 1px 3px rgba(15,23,42,.12);}
+    @media (max-width:640px){.strategy-switch-label{display:none}.strategy-switch{padding:6px}.strategy-slider{width:42px;}}
+    body:not(.theme-x3-dark) .push-field-help{color:#64748b;}
+    body:not(.theme-x3-dark) .push-field-row{border-bottom-color:rgba(15,23,42,.08);}
+    body:not(.theme-x3-dark) .push-log-item{background:rgba(15,23,42,.035);border-color:rgba(15,23,42,.08);color:#334155;}
+    body:not(.theme-x3-dark) .push-log-empty{color:#64748b;}
+    body:not(.theme-x3-dark) .panel-toggle-text{color:#475569;}
+    body:not(.theme-x3-dark) .panel-toggle-slider{background:#e5e7eb;border-color:rgba(15,23,42,.12);box-shadow:inset 0 1px 3px rgba(15,23,42,.12);}
+    @media (max-width:860px){.push-field-row{grid-template-columns:1fr;gap:8px;}.push-field-telegram_chat_id input,.push-field-ntfy_topic input,.push-field-ntfy_username input,.push-field-ntfy_password input,.push-field-ntfy_priority input{max-width:100%;}}
+    @media (max-width:640px){
+      .page-nav{grid-template-columns:repeat(5,minmax(0,1fr)) !important;gap:5px !important;padding:6px !important;}
+      .page-nav-link{font-size:13px !important;min-height:36px !important;padding:7px 2px !important;border-radius:12px !important;}
+      .push-action-row .action-btn,.push-test-inline{flex:1 1 auto;}
+      .push-test-inline .action-btn{width:100%;}
+    }
+    @media (max-width:360px){
+      .page-nav{gap:4px !important;padding:5px !important;}
+      .page-nav-link{font-size:12px !important;min-height:34px !important;padding-left:1px !important;padding-right:1px !important;}
+    }
+
+
+    /* === light theme polish: match system page, softer contrast === */
+    body.theme-x3-light,
+    body:not(.theme-x3-dark){
+      background:linear-gradient(180deg,#edf3f1 0%,#f4f7f6 48%,#eef4f2 100%) !important;
+      color:#243142 !important;
+    }
+    body.theme-x3-light::before,
+    body:not(.theme-x3-dark)::before{
+      background:
+        radial-gradient(circle at 16% 0%, rgba(5,150,105,.055), transparent 34%),
+        radial-gradient(circle at 86% 8%, rgba(56,189,248,.045), transparent 32%),
+        linear-gradient(90deg, rgba(15,23,42,.026) 1px, transparent 1px),
+        linear-gradient(180deg, rgba(15,23,42,.022) 1px, transparent 1px) !important;
+      background-size:auto,auto,46px 46px,46px 46px !important;
+    }
+    body.theme-x3-light .topbar,
+    body:not(.theme-x3-dark) .topbar,
+    body.theme-x3-light .page-nav,
+    body:not(.theme-x3-dark) .page-nav,
+    body.theme-x3-light .card,
+    body:not(.theme-x3-dark) .card,
+    body.theme-x3-light .page-card,
+    body:not(.theme-x3-dark) .page-card,
+    body.theme-x3-light .symbols-current-card,
+    body:not(.theme-x3-dark) .symbols-current-card{
+      background:linear-gradient(180deg, rgba(255,255,255,.86), rgba(248,251,250,.78)) !important;
+      border-color:rgba(15,23,42,.105) !important;
+      color:#243142 !important;
+      box-shadow:0 14px 34px rgba(15,23,42,.075), inset 0 1px 0 rgba(255,255,255,.92) !important;
+    }
+    body.theme-x3-light .section-header,
+    body:not(.theme-x3-dark) .section-header,
+    body.theme-x3-light .push-field-row,
+    body:not(.theme-x3-dark) .push-field-row{
+      border-color:rgba(15,23,42,.09) !important;
+    }
+    body.theme-x3-light .section-header h2,
+    body:not(.theme-x3-dark) .section-header h2,
+    body.theme-x3-light .section-header h3,
+    body:not(.theme-x3-dark) .section-header h3,
+    body.theme-x3-light .subsection-title,
+    body:not(.theme-x3-dark) .subsection-title,
+    body.theme-x3-light label,
+    body:not(.theme-x3-dark) label{
+      color:#1f2937 !important;
+    }
+    body.theme-x3-light .section-note,
+    body:not(.theme-x3-dark) .section-note,
+    body.theme-x3-light .snapshot-reason-card,
+    body:not(.theme-x3-dark) .snapshot-reason-card{
+      background:rgba(255,255,255,.72);
+      border-color:rgba(30,41,59,.12);
+      color:rgba(15,23,42,.88);
+    }
+
+    body.theme-x3-light .snapshot-empty,
+    body:not(.theme-x3-dark) .snapshot-empty,
+    body.theme-x3-light .push-field-help,
+    body:not(.theme-x3-dark) .push-field-help{
+      color:#5f6f83 !important;
+    }
+    body.theme-x3-light input,
+    body:not(.theme-x3-dark) input,
+    body.theme-x3-light select,
+    body:not(.theme-x3-dark) select,
+    body.theme-x3-light textarea,
+    body:not(.theme-x3-dark) textarea{
+      background:#fbfdfc !important;
+      border:1px solid rgba(15,23,42,.18) !important;
+      color:#162033 !important;
+      box-shadow:0 1px 0 rgba(255,255,255,.92), inset 0 1px 2px rgba(15,23,42,.035) !important;
+    }
+    body.theme-x3-light input::placeholder,
+    body:not(.theme-x3-dark) input::placeholder,
+    body.theme-x3-light textarea::placeholder,
+    body:not(.theme-x3-dark) textarea::placeholder{
+      color:#8a97a8 !important;
+    }
+    body.theme-x3-light input[readonly],
+    body:not(.theme-x3-dark) input[readonly],
+    body.theme-x3-light select:disabled,
+    body:not(.theme-x3-dark) select:disabled{
+      background:#eef3f1 !important;
+      color:#4b5f73 !important;
+      opacity:1 !important;
+    }
+    body.theme-x3-light .config-card,
+    body:not(.theme-x3-dark) .config-card,
+    body.theme-x3-light .summary-line,
+    body:not(.theme-x3-dark) .summary-line,
+    body.theme-x3-light .status-box,
+    body:not(.theme-x3-dark) .status-box,
+    body.theme-x3-light .output-box,
+    body:not(.theme-x3-dark) .output-box,
+    body.theme-x3-light .raw-output,
+    body:not(.theme-x3-dark) .raw-output,
+    body.theme-x3-light details.snapshot-details,
+    body:not(.theme-x3-dark) details.snapshot-details{
+      background:linear-gradient(180deg, rgba(255,255,255,.82), rgba(244,248,247,.78)) !important;
+      border:1px solid rgba(15,23,42,.12) !important;
+      color:#263447 !important;
+      box-shadow:0 10px 22px rgba(15,23,42,.045), inset 0 1px 0 rgba(255,255,255,.86) !important;
+    }
+    body.theme-x3-light .status-box pre,
+    body:not(.theme-x3-dark) .status-box pre,
+    body.theme-x3-light .output-box pre,
+    body:not(.theme-x3-dark) .output-box pre,
+    body.theme-x3-light .help-panel pre,
+    body:not(.theme-x3-dark) .help-panel pre,
+    body.theme-x3-light details.snapshot-details > summary,
+    body:not(.theme-x3-dark) details.snapshot-details > summary{
+      color:#263447 !important;
+      opacity:1 !important;
+      text-shadow:none !important;
+    }
+    body.theme-x3-light .reference-price-card,
+    body:not(.theme-x3-dark) .reference-price-card,
+    body.theme-x3-light .source-metric-card,
+    body:not(.theme-x3-dark) .source-metric-card,
+    body.theme-x3-light .snapshot-kv,
+    body:not(.theme-x3-dark) .snapshot-kv{
+      background:#f8fbfa !important;
+      border-color:rgba(15,23,42,.12) !important;
+      color:#263447 !important;
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.88) !important;
+    }
+    body.theme-x3-light .reference-price-card.primary,
+    body:not(.theme-x3-dark) .reference-price-card.primary{
+      background:linear-gradient(135deg, rgba(5,150,105,.10), rgba(14,165,233,.055)) !important;
+      border-color:rgba(5,150,105,.32) !important;
+    }
+    body.theme-x3-light .reference-price-card.error,
+    body:not(.theme-x3-dark) .reference-price-card.error,
+    body.theme-x3-light .source-metric-card.error,
+    body:not(.theme-x3-dark) .source-metric-card.error{
+      background:rgba(254,242,242,.92) !important;
+      border-color:rgba(220,38,38,.22) !important;
+    }
+    body.theme-x3-light .reference-price-card .name,
+    body:not(.theme-x3-dark) .reference-price-card .name,
+    body.theme-x3-light .source-metric-card .name,
+    body:not(.theme-x3-dark) .source-metric-card .name,
+    body.theme-x3-light .snapshot-kv .k,
+    body:not(.theme-x3-dark) .snapshot-kv .k,
+    body.theme-x3-light .snapshot-table th,
+    body:not(.theme-x3-dark) .snapshot-table th{
+      color:#52647a !important;
+    }
+    body.theme-x3-light .reference-price-card .price,
+    body:not(.theme-x3-dark) .reference-price-card .price,
+    body.theme-x3-light .source-metric-card .price,
+    body:not(.theme-x3-dark) .source-metric-card .price,
+    body.theme-x3-light .snapshot-kv .v,
+    body:not(.theme-x3-dark) .snapshot-kv .v,
+    body.theme-x3-light .summary-value,
+    body:not(.theme-x3-dark) .summary-value{
+      color:#142033 !important;
+    }
+    body.theme-x3-light .reference-price-card .meta,
+    body:not(.theme-x3-dark) .reference-price-card .meta,
+    body.theme-x3-light .source-metric-card .meta,
+    body:not(.theme-x3-dark) .source-metric-card .meta,
+    body.theme-x3-light .source-metric-card .metric-line,
+    body:not(.theme-x3-dark) .source-metric-card .metric-line,
+    body.theme-x3-light .summary-label,
+    body:not(.theme-x3-dark) .summary-label{
+      color:#64748b !important;
+    }
+    body.theme-x3-light .snapshot-table th,
+    body:not(.theme-x3-dark) .snapshot-table th,
+    body.theme-x3-light .snapshot-table td,
+    body:not(.theme-x3-dark) .snapshot-table td{
+      border-bottom-color:rgba(15,23,42,.095) !important;
+      color:#263447 !important;
+    }
+    body.theme-x3-light .source-chip,
+    body:not(.theme-x3-dark) .source-chip{
+      background:rgba(184,139,51,.13) !important;
+      color:#7a5418 !important;
+    }
+    body.theme-x3-light .rollback-note,
+    body:not(.theme-x3-dark) .rollback-note{
+      color:#8a5a16 !important;
+    }
+    body.theme-x3-light .rollback-btn,
+    body:not(.theme-x3-dark) .rollback-btn{
+      background:#fff7ed !important;
+      border-color:rgba(217,119,6,.30) !important;
+      color:#9a3412 !important;
+    }
+    @media (max-width:640px){
+      .status-action-row{width:auto;display:flex !important;grid-template-columns:none !important;gap:8px;align-items:center;justify-content:flex-end;}
+      .status-action-row form,.status-action-row .action-btn{width:auto;}
+      .status-action-row .action-btn{min-height:40px;min-width:70px;padding:9px 14px;border-radius:12px;font-size:14px;line-height:20px;}
+      .status-control-row form{width:100%;display:grid !important;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end;}
+      .status-control-row .field-block{min-width:0;}
+      .status-control-row .action-btn{min-width:70px;padding-left:12px;padding-right:12px;}
+      .section-header.between{align-items:center;gap:10px;flex-direction:row;}
+      .snapshot-toolbar{width:100%;align-items:stretch;}
+      .snapshot-date-form{flex:1 1 100%;display:grid;grid-template-columns:auto minmax(0,1fr);}
+      .panel-toggle{justify-content:flex-end;}
+    }
+
+
+    /* === requested light-theme refinements based on quant_light_theme_fixed === */
+    body.theme-x3-light .params-basic-info-flat,
+    body:not(.theme-x3-dark) .params-basic-info-flat{
+      background:transparent !important;
+      border:0 !important;
+      box-shadow:none !important;
+      padding:0 !important;
+    }
+    body.theme-x3-light .symbols-current-card .selected-symbol-select,
+    body:not(.theme-x3-dark) .symbols-current-card .selected-symbol-select,
+    body.theme-x3-light .symbols-current-card .selected-symbol-pending,
+    body:not(.theme-x3-dark) .symbols-current-card .selected-symbol-pending,
+    body.theme-x3-light .symbol-editor-form input,
+    body:not(.theme-x3-dark) .symbol-editor-form input,
+    body.theme-x3-light form[action*="backtest"] input,
+    body:not(.theme-x3-dark) form[action*="backtest"] input{
+      background:#fbfdfc !important;
+    }
+
+
+
+    /* 参数页：亮色主题下移除关键参数分组背后的方框，参考暗色主题的扁平展示 */
+    body.theme-x3-light .params-form .config-card.param-group-position,
+    body:not(.theme-x3-dark) .params-form .config-card.param-group-position,
+    body.theme-x3-light .params-form .config-card.param-group-zones,
+    body:not(.theme-x3-dark) .params-form .config-card.param-group-zones,
+    body.theme-x3-light .params-form .config-card.param-group-trend_zone,
+    body:not(.theme-x3-dark) .params-form .config-card.param-group-trend_zone,
+    body.theme-x3-light .params-form .config-card.param-group-clear_zone,
+    body:not(.theme-x3-dark) .params-form .config-card.param-group-clear_zone,
+    body.theme-x3-light .params-form .config-card.param-group-pyramid_add,
+    body:not(.theme-x3-dark) .params-form .config-card.param-group-pyramid_add{
+      background:transparent !important;
+      border:0 !important;
+      box-shadow:none !important;
+      padding:0 !important;
+    }
+    body.theme-x3-light .params-form .config-card.param-group-position + .config-card,
+    body:not(.theme-x3-dark) .params-form .config-card.param-group-position + .config-card,
+    body.theme-x3-light .params-form .config-card.param-group-zones + .config-card,
+    body:not(.theme-x3-dark) .params-form .config-card.param-group-zones + .config-card,
+    body.theme-x3-light .params-form .config-card.param-group-trend_zone + .config-card,
+    body:not(.theme-x3-dark) .params-form .config-card.param-group-trend_zone + .config-card,
+    body.theme-x3-light .params-form .config-card.param-group-clear_zone + .config-card,
+    body:not(.theme-x3-dark) .params-form .config-card.param-group-clear_zone + .config-card,
+    body.theme-x3-light .params-form .config-card.param-group-pyramid_add + .config-card,
+    body:not(.theme-x3-dark) .params-form .config-card.param-group-pyramid_add + .config-card{
+      margin-top:18px;
+    }
+    body.theme-x3-light .params-form .config-card.param-group-position .subsection-title,
+    body:not(.theme-x3-dark) .params-form .config-card.param-group-position .subsection-title,
+    body.theme-x3-light .params-form .config-card.param-group-zones .subsection-title,
+    body:not(.theme-x3-dark) .params-form .config-card.param-group-zones .subsection-title,
+    body.theme-x3-light .params-form .config-card.param-group-trend_zone .subsection-title,
+    body:not(.theme-x3-dark) .params-form .config-card.param-group-trend_zone .subsection-title,
+    body.theme-x3-light .params-form .config-card.param-group-clear_zone .subsection-title,
+    body:not(.theme-x3-dark) .params-form .config-card.param-group-clear_zone .subsection-title,
+    body.theme-x3-light .params-form .config-card.param-group-pyramid_add .subsection-title,
+    body:not(.theme-x3-dark) .params-form .config-card.param-group-pyramid_add .subsection-title{
+      margin-top:2px !important;
+      margin-bottom:12px !important;
+    }
+  
+
+    /* === light-theme params/backtest cleanup v2: remove remaining group panels === */
+    body.theme-x3-light .params-form .page-card-group,
+    body:not(.theme-x3-dark) .params-form .page-card-group,
+    body.theme-x3-light .params-form .compact-group,
+    body:not(.theme-x3-dark) .params-form .compact-group{
+      background:transparent !important;
+      border:0 !important;
+      box-shadow:none !important;
+      padding:0 !important;
+    }
+    body.theme-x3-light .params-form .config-card,
+    body:not(.theme-x3-dark) .params-form .config-card,
+    body.theme-x3-light .params-form .config-card.param-group-position,
+    body:not(.theme-x3-dark) .params-form .config-card.param-group-position,
+    body.theme-x3-light .params-form .config-card.param-group-sideways,
+    body:not(.theme-x3-dark) .params-form .config-card.param-group-sideways,
+    body.theme-x3-light .params-form .config-card.param-group-zones,
+    body:not(.theme-x3-dark) .params-form .config-card.param-group-zones,
+    body.theme-x3-light .params-form .config-card.param-group-box_add,
+    body:not(.theme-x3-dark) .params-form .config-card.param-group-box_add,
+    body.theme-x3-light .params-form .config-card.param-group-box_grid,
+    body:not(.theme-x3-dark) .params-form .config-card.param-group-box_grid,
+    body.theme-x3-light .params-form .config-card.param-group-trend_zone,
+    body:not(.theme-x3-dark) .params-form .config-card.param-group-trend_zone,
+    body.theme-x3-light .params-form .config-card.param-group-clear_zone,
+    body:not(.theme-x3-dark) .params-form .config-card.param-group-clear_zone,
+    body.theme-x3-light .params-form .config-card.param-group-pyramid_add,
+    body:not(.theme-x3-dark) .params-form .config-card.param-group-pyramid_add{
+      background:transparent !important;
+      border:0 !important;
+      box-shadow:none !important;
+      padding:0 !important;
+    }
+    body.theme-x3-light .params-form .config-card + .config-card,
+    body:not(.theme-x3-dark) .params-form .config-card + .config-card{
+      margin-top:18px !important;
+    }
+    body.theme-x3-light .params-form .subsection-title,
+    body:not(.theme-x3-dark) .params-form .subsection-title{
+      margin-top:2px !important;
+      margin-bottom:12px !important;
+    }
+
+    /* 回测页：亮色主题去掉 details 外层方框，改成轻量按钮式展开/收起 */
+    body.theme-x3-light .raw-output.backtest-output-toggle,
+    body:not(.theme-x3-dark) .raw-output.backtest-output-toggle{
+      background:transparent !important;
+      border:0 !important;
+      box-shadow:none !important;
+      padding:0 !important;
+      margin-top:14px !important;
+      color:#263447 !important;
+    }
+    body.theme-x3-light .raw-output.backtest-output-toggle > summary,
+    body:not(.theme-x3-dark) .raw-output.backtest-output-toggle > summary{
+      list-style:none !important;
+      display:inline-flex !important;
+      align-items:center !important;
+      gap:8px !important;
+      width:auto !important;
+      cursor:pointer !important;
+      user-select:none !important;
+      padding:9px 14px !important;
+      border-radius:999px !important;
+      border:1px solid rgba(5,150,105,.24) !important;
+      background:rgba(255,255,255,.62) !important;
+      color:#047857 !important;
+      font-weight:800 !important;
+      box-shadow:0 8px 18px rgba(15,23,42,.055), inset 0 1px 0 rgba(255,255,255,.86) !important;
+    }
+    body.theme-x3-light .raw-output.backtest-output-toggle > summary::-webkit-details-marker,
+    body:not(.theme-x3-dark) .raw-output.backtest-output-toggle > summary::-webkit-details-marker{display:none !important;}
+    body.theme-x3-light .raw-output.backtest-output-toggle > summary::before,
+    body:not(.theme-x3-dark) .raw-output.backtest-output-toggle > summary::before{
+      content:"▾";
+      font-size:12px;
+      transform:rotate(-90deg);
+      transition:transform .18s ease;
+    }
+    body.theme-x3-light .raw-output.backtest-output-toggle[open] > summary::before,
+    body:not(.theme-x3-dark) .raw-output.backtest-output-toggle[open] > summary::before{transform:rotate(0deg);}
+    .backtest-output-toggle .toggle-close-label{display:none;}
+    .backtest-output-toggle[open] .toggle-open-label{display:none;}
+    .backtest-output-toggle[open] .toggle-close-label{display:inline;}
+    body.theme-x3-light .raw-output.backtest-output-toggle .output-box,
+    body:not(.theme-x3-dark) .raw-output.backtest-output-toggle .output-box{
+      margin-top:10px !important;
+    }
+
+
+    /* === Champagne nav interaction fix: prevent green flash in light theme === */
+    body.theme-x3-light .page-nav-link,
+    body:not(.theme-x3-dark) .page-nav-link{
+      -webkit-tap-highlight-color:rgba(214,185,122,.24) !important;
+    }
+    body.theme-x3-light .page-nav-link:hover,
+    body:not(.theme-x3-dark) .page-nav-link:hover,
+    body.theme-x3-light .page-nav-link:focus,
+    body:not(.theme-x3-dark) .page-nav-link:focus,
+    body.theme-x3-light .page-nav-link:focus-visible,
+    body:not(.theme-x3-dark) .page-nav-link:focus-visible,
+    body.theme-x3-light .page-nav-link:active,
+    body:not(.theme-x3-dark) .page-nav-link:active,
+    body.theme-x3-light .page-nav-link.active,
+    body:not(.theme-x3-dark) .page-nav-link.active{
+      background:linear-gradient(135deg, rgba(250,239,210,.98), rgba(218,188,123,.82)) !important;
+      background-color:#ead39c !important;
+      border-color:rgba(174,139,67,.56) !important;
+      color:#4a3a1e !important;
+      box-shadow:0 10px 20px rgba(120,92,38,.14), 0 0 0 1px rgba(255,255,255,.40), inset 0 1px 0 rgba(255,255,255,.72) !important;
+      outline:none !important;
+      filter:none !important;
+    }
+
+.reference-card-button { width:100%; border:0; background:transparent; color:inherit; text-align:left; padding:0; cursor:pointer; font:inherit; }
+.reference-price-card { display:block; }
+
+
+    /* === No green flash while light theme is restored before JS swaps body class === */
+    html[data-quant-theme="light"] body.theme-x3-dark .page-nav-link,
+    html[data-quant-theme="light"] body.theme-x3-dark .page-nav-link:link,
+    html[data-quant-theme="light"] body.theme-x3-dark .page-nav-link:visited{
+      -webkit-tap-highlight-color:rgba(214,185,122,.18) !important;
+      caret-color:#b38a3a !important;
+    }
+    html[data-quant-theme="light"] body.theme-x3-dark .page-nav-link:hover,
+    html[data-quant-theme="light"] body.theme-x3-dark .page-nav-link:focus,
+    html[data-quant-theme="light"] body.theme-x3-dark .page-nav-link:focus-visible,
+    html[data-quant-theme="light"] body.theme-x3-dark .page-nav-link:active,
+    html[data-quant-theme="light"] body.theme-x3-dark .page-nav-link.active{
+      background:linear-gradient(135deg, rgba(250,239,210,.98), rgba(218,188,123,.82)) !important;
+      background-color:#ead39c !important;
+      border-color:rgba(174,139,67,.56) !important;
+      color:#4a3a1e !important;
+      box-shadow:0 10px 20px rgba(120,92,38,.14), 0 0 0 1px rgba(255,255,255,.40), inset 0 1px 0 rgba(255,255,255,.72) !important;
+      outline:none !important;
+      filter:none !important;
+    }
+
+
+
+    /* === mobile-only requested button sizing/placement fixes === */
+    @media (max-width:640px){
+      .symbols-current-card .symbol-switcher-row{align-items:center !important;gap:8px !important;}
+      .symbols-current-card .symbol-switcher-row .grow{flex:1 1 100% !important;min-width:100% !important;}
+      .symbols-current-card .symbol-switcher-row .action-btn{flex:0 0 auto !important;width:auto !important;min-width:70px !important;min-height:40px !important;padding:9px 14px !important;border-radius:12px !important;font-size:14px !important;line-height:20px !important;}
+      .section-header.between{display:flex !important;align-items:center !important;justify-content:space-between !important;flex-direction:row !important;gap:10px !important;}
+      .section-header.between h2{margin:0 !important;min-width:0 !important;}
+      .status-action-row{width:auto !important;display:flex !important;grid-template-columns:none !important;align-items:center !important;justify-content:flex-end !important;gap:8px !important;flex:0 0 auto !important;}
+      .status-action-row form{width:auto !important;margin:0 !important;}
+      .status-action-row .action-btn{width:auto !important;min-width:70px !important;min-height:40px !important;padding:9px 14px !important;border-radius:12px !important;font-size:14px !important;line-height:20px !important;}
+    }
+
+/* =========================================
+   Quant 清淡色主题
+   ========================================= */
+:root{
+  --lt-page:#f0eeec;
+  --lt-surface:#f5f3f1;
+  --lt-card:#fbfaf8;
+  --lt-card-alt:#f4f2ef;
+  --lt-field:#fcfbfa;
+  --lt-field-muted:#eae8e4;
+  --lt-border:rgba(80,60,40,.12);
+  --lt-border-soft:rgba(80,60,40,.07);
+  --lt-border-input:rgba(80,60,40,.18);
+  --lt-text:#2c2824;
+  --lt-heading:#1f1b18;
+  --lt-muted:#8a8078;
+  --lt-accent-dark:#5a5048;
+  --lt-accent-mid:#8a7a6a;
+  --lt-gold:#c9a35b;
+  --lt-gold-light:#ead3a0;
+}
+  --lt-border:rgba(80,60,40,.16);
+  --lt-border-soft:rgba(80,60,40,.09);
+  --lt-border-input:rgba(80,60,40,.24);
+  --lt-text:#2c241e;
+  --lt-heading:#1f1914;
+  --lt-muted:#7a6f64;
+  --lt-accent-dark:#5a4a3a;
+  --lt-accent-mid:#8a7a6a;
+  --lt-gold:#c9a35b;
+  --lt-gold-light:#ead3a0;
+}
+body.theme-x3-light,
+body:not(.theme-x3-dark){
+  background:radial-gradient(circle at 14% -10%, rgba(200,180,160,.08), transparent 38%),radial-gradient(circle at 88% 4%, rgba(180,170,150,.06), transparent 32%),linear-gradient(180deg,#ecebe9 0%,#f3f1ef 44%,#e4e2df 100%) !important;
+  color:var(--lt-text) !important;
+  -webkit-font-smoothing:antialiased;
+}
+body.theme-x3-light::before,
+body:not(.theme-x3-dark)::before{opacity:.35 !important;}
+body.theme-x3-light .topbar,
+body:not(.theme-x3-dark) .topbar,
+body.theme-x3-light .page-nav,
+body:not(.theme-x3-dark) .page-nav,
+body.theme-x3-light .card,
+body:not(.theme-x3-dark) .card,
+body.theme-x3-light .page-card,
+body:not(.theme-x3-dark) .page-card,
+body.theme-x3-light .symbols-current-card,
+body:not(.theme-x3-dark) .symbols-current-card,
+body.theme-x3-light .push-log-card,
+body:not(.theme-x3-dark) .push-log-card,
+body.theme-x3-light .simple-modal-card,
+body:not(.theme-x3-dark) .simple-modal-card{
+  background:linear-gradient(180deg, rgba(251,250,248,.94), rgba(243,241,239,.90)) !important;
+  border:1px solid var(--lt-border-soft) !important;
+  color:var(--lt-text) !important;
+  box-shadow:0 16px 34px rgba(60,50,40,.08),0 1px 2px rgba(60,50,40,.045),inset 0 1px 0 rgba(255,255,255,.90) !important;
+}
+body.theme-x3-light .topbar,
+body:not(.theme-x3-dark) .topbar{background:linear-gradient(135deg, rgba(248,246,244,.92), rgba(237,235,232,.88)) !important;border-color:var(--lt-border-soft) !important;}
+body.theme-x3-light .page-nav,
+body:not(.theme-x3-dark) .page-nav{background:linear-gradient(135deg, rgba(245,244,242,.88), rgba(232,230,227,.84)) !important;}
+body.theme-x3-light .status-box,
+body:not(.theme-x3-dark) .status-box,
+body.theme-x3-light .output-box,
+body:not(.theme-x3-dark) .output-box,
+body.theme-x3-light .raw-output,
+body:not(.theme-x3-dark) .raw-output,
+body.theme-x3-light .summary-line,
+body:not(.theme-x3-dark) .summary-line,
+body.theme-x3-light .summary-list,
+body:not(.theme-x3-dark) .summary-list,
+body.theme-x3-light .backtest-summary-list,
+body:not(.theme-x3-dark) .backtest-summary-list,
+body.theme-x3-light .snapshot-reason-card,
+body:not(.theme-x3-dark) .snapshot-reason-card,
+body.theme-x3-light .reference-price-card,
+body:not(.theme-x3-dark) .reference-price-card,
+body.theme-x3-light .source-metric-card,
+body:not(.theme-x3-dark) .source-metric-card,
+body.theme-x3-light .snapshot-kv,
+body:not(.theme-x3-dark) .snapshot-kv,
+body.theme-x3-light .help-panel,
+body:not(.theme-x3-dark) .help-panel,
+body.theme-x3-light .return-help-panel,
+body:not(.theme-x3-dark) .return-help-panel,
+body.theme-x3-light .push-log-item,
+body:not(.theme-x3-dark) .push-log-item,
+body.theme-x3-light .push-log-detail,
+body:not(.theme-x3-dark) .push-log-detail,
+body.theme-x3-light .flash,
+body:not(.theme-x3-dark) .flash{
+  background:linear-gradient(180deg, rgba(248,247,245,.95), rgba(238,237,235,.90)) !important;
+  border:1px solid var(--lt-border) !important;
+  color:var(--lt-text) !important;
+  box-shadow:0 8px 18px rgba(60,50,40,.05),inset 0 1px 0 rgba(255,255,255,.82) !important;
+}
+body.theme-x3-light input,
+body:not(.theme-x3-dark) input,
+body.theme-x3-light select,
+body:not(.theme-x3-dark) select,
+body.theme-x3-light textarea,
+body:not(.theme-x3-dark) textarea,
+body.theme-x3-light .tool-form input,
+body:not(.theme-x3-dark) .tool-form input,
+body.theme-x3-light .tool-form select,
+body:not(.theme-x3-dark) .tool-form select,
+body.theme-x3-light .tool-form textarea,
+body:not(.theme-x3-dark) .tool-form textarea,
+body.theme-x3-light .backtest-form input,
+body:not(.theme-x3-dark) .backtest-form input,
+body.theme-x3-light .backtest-form select,
+body:not(.theme-x3-dark) .backtest-form select,
+body.theme-x3-light .backtest-form textarea,
+body:not(.theme-x3-dark) .backtest-form textarea,
+body.theme-x3-light .symbols-current-card input,
+body:not(.theme-x3-dark) .symbols-current-card input,
+body.theme-x3-light .symbols-current-card select,
+body:not(.theme-x3-dark) .symbols-current-card select,
+body.theme-x3-light .symbols-current-card textarea,
+body:not(.theme-x3-dark) .symbols-current-card textarea,
+body.theme-x3-light .selected-symbol-select,
+body:not(.theme-x3-dark) .selected-symbol-select{
+  background:linear-gradient(180deg,#fcfbfa,#f3f2f0) !important;
+  border:1px solid var(--lt-border-input) !important;
+  color:#1f1914 !important;
+  box-shadow:0 1px 0 rgba(255,255,255,.95),inset 0 1px 2px rgba(60,50,40,.055) !important;
+}
+body.theme-x3-light input:hover,
+body:not(.theme-x3-dark) input:hover,
+body.theme-x3-light select:hover,
+body:not(.theme-x3-dark) select:hover,
+body.theme-x3-light textarea:hover,
+body:not(.theme-x3-dark) textarea:hover,
+body.theme-x3-light .selected-symbol-select:hover,
+body:not(.theme-x3-dark) .selected-symbol-select:hover{background:linear-gradient(180deg,#ffffff,#f2f1ef) !important;border-color:rgba(60,50,40,.28) !important;}
+body.theme-x3-light input:focus,
+body:not(.theme-x3-dark) input:focus,
+body.theme-x3-light select:focus,
+body:not(.theme-x3-dark) select:focus,
+body.theme-x3-light textarea:focus,
+body:not(.theme-x3-dark) textarea:focus,
+body.theme-x3-light .selected-symbol-select:focus,
+body:not(.theme-x3-dark) .selected-symbol-select:focus{border-color:var(--lt-gold) !important;box-shadow:0 0 0 3px rgba(201,163,91,.14),inset 0 1px 2px rgba(60,50,40,.055) !important;outline:none !important;}
+body.theme-x3-light input[readonly],
+body:not(.theme-x3-dark) input[readonly],
+body.theme-x3-light .readonly-block input,
+body:not(.theme-x3-dark) .readonly-block input,
+body.theme-x3-light select:disabled,
+body:not(.theme-x3-dark) select:disabled{background:linear-gradient(180deg,#eae8e6,#e1dfdc) !important;border-color:rgba(80,60,40,.12) !important;color:#8a8078 !important;}
+body.theme-x3-light h1,
+body:not(.theme-x3-dark) h1,
+body.theme-x3-light h2,
+body:not(.theme-x3-dark) h2,
+body.theme-x3-light h3,
+body:not(.theme-x3-dark) h3,
+body.theme-x3-light .subsection-title,
+body:not(.theme-x3-dark) .subsection-title,
+body.theme-x3-light label,
+body:not(.theme-x3-dark) label{color:var(--lt-heading) !important;text-shadow:none !important;}
+body.theme-x3-light pre,
+body:not(.theme-x3-dark) pre,
+body.theme-x3-light .status-box pre,
+body:not(.theme-x3-dark) .status-box pre,
+body.theme-x3-light .output-box pre,
+body:not(.theme-x3-dark) .output-box pre,
+body.theme-x3-light .raw-output pre,
+body:not(.theme-x3-dark) .raw-output pre{color:var(--lt-text) !important;text-shadow:none !important;}
+body.theme-x3-light .section-note,
+body:not(.theme-x3-dark) .section-note,
+body.theme-x3-light .push-field-help,
+body:not(.theme-x3-dark) .push-field-help,
+body.theme-x3-light .field-help,
+body:not(.theme-x3-dark) .field-help,
+body.theme-x3-light .help-text,
+body:not(.theme-x3-dark) .help-text,
+body.theme-x3-light .hint,
+body:not(.theme-x3-dark) .hint,
+body.theme-x3-light .form-hint,
+body:not(.theme-x3-dark) .form-hint,
+body.theme-x3-light .muted,
+body:not(.theme-x3-dark) .muted,
+body.theme-x3-light small,
+body:not(.theme-x3-dark) small,
+body.theme-x3-light .meta,
+body:not(.theme-x3-dark) .meta,
+body.theme-x3-light .summary-label,
+body:not(.theme-x3-dark) .summary-label,
+body.theme-x3-light .snapshot-empty,
+body:not(.theme-x3-dark) .snapshot-empty{color:var(--lt-muted) !important;background:transparent !important;}
+body.theme-x3-light .page-nav-link,
+body:not(.theme-x3-dark) .page-nav-link{background:rgba(251,250,248,.64) !important;border-color:rgba(80,60,40,.10) !important;color:#4a4642 !important;transition:background .12s ease,border-color .12s ease,color .12s ease,box-shadow .12s ease !important;}
+body.theme-x3-light .page-nav-link:hover,
+body:not(.theme-x3-dark) .page-nav-link:hover,
+body.theme-x3-light .page-nav-link:focus,
+body:not(.theme-x3-dark) .page-nav-link:focus,
+body.theme-x3-light .page-nav-link:active,
+body:not(.theme-x3-dark) .page-nav-link:active,
+body.theme-x3-light .page-nav-link.active,
+body:not(.theme-x3-dark) .page-nav-link.active{background:linear-gradient(135deg, rgba(245,238,225,.98), rgba(218,200,165,.78)) !important;background-color:#eadcc4 !important;border-color:rgba(174,150,100,.48) !important;color:#4a3d2e !important;box-shadow:0 10px 20px rgba(120,100,60,.12),0 0 0 1px rgba(255,255,255,.40),inset 0 1px 0 rgba(255,255,255,.72) !important;outline:none !important;}
+body.theme-x3-light .primary-btn,
+body:not(.theme-x3-dark) .primary-btn,
+body.theme-x3-light .action-btn:not(.secondary-btn):not(.danger-btn):not(.logout-btn):not(.artifact-btn),
+body:not(.theme-x3-dark) .action-btn:not(.secondary-btn):not(.danger-btn):not(.logout-btn):not(.artifact-btn){background:linear-gradient(135deg,#6a6058,#4e4842) !important;border-color:rgba(60,50,40,.30) !important;color:#f8f6f4 !important;box-shadow:0 10px 22px rgba(60,50,40,.14),inset 0 1px 0 rgba(255,255,255,.18) !important;}
+body.theme-x3-light .secondary-btn,
+body:not(.theme-x3-dark) .secondary-btn,
+body.theme-x3-light .logout-btn,
+body:not(.theme-x3-dark) .logout-btn,
+body.theme-x3-light .artifact-btn,
+body:not(.theme-x3-dark) .artifact-btn{background:linear-gradient(180deg,#faf9f8,#e9e7e4) !important;border-color:rgba(80,60,40,.14) !important;color:#4a4642 !important;box-shadow:0 8px 18px rgba(60,50,40,.045),inset 0 1px 0 rgba(255,255,255,.80) !important;}
+body.theme-x3-light .symbol-switcher-row .secondary-btn,
+body:not(.theme-x3-dark) .symbol-switcher-row .secondary-btn{background:linear-gradient(135deg,#f7ecd2,#e7d0a1) !important;border-color:rgba(176,132,40,.24) !important;color:#5f4a25 !important;}
+body.theme-x3-light .symbol-switcher-row .danger-btn,
+body:not(.theme-x3-dark) .symbol-switcher-row .danger-btn{background:linear-gradient(135deg,#e05a4a,#c94436) !important;border-color:rgba(185,28,28,.38) !important;color:#fff7f7 !important;}
+body.theme-x3-light .reference-price-card.primary,
+body:not(.theme-x3-dark) .reference-price-card.primary{background:linear-gradient(135deg, rgba(201,163,91,.14), rgba(218,186,118,.08)) !important;border-color:rgba(174,139,67,.30) !important;}
+body.theme-x3-light .reference-price-card.error,
+body:not(.theme-x3-dark) .reference-price-card.error,
+body.theme-x3-light .source-metric-card.error,
+body:not(.theme-x3-dark) .source-metric-card.error{background:linear-gradient(180deg,#fcf4f4,#f7eaea) !important;border-color:rgba(185,28,28,.20) !important;}
+body.theme-x3-light .snapshot-table-wrap,
+body:not(.theme-x3-dark) .snapshot-table-wrap,
+body.theme-x3-light .push-log-list,
+body:not(.theme-x3-dark) .push-log-list{background:linear-gradient(180deg, rgba(245,240,234,.84), rgba(234,228,222,.74)) !important;border:1px solid var(--lt-border) !important;border-radius:18px !important;box-shadow:inset 0 1px 0 rgba(255,255,255,.80) !important;}
+body.theme-x3-light .snapshot-table th,
+body:not(.theme-x3-dark) .snapshot-table th{background:rgba(222,215,206,.78) !important;color:#5a4f44 !important;}
+body.theme-x3-light .snapshot-table td,
+body:not(.theme-x3-dark) .snapshot-table td{background:rgba(250,247,243,.42) !important;color:var(--lt-text) !important;border-bottom-color:rgba(80,60,40,.09) !important;}
+body.theme-x3-light .params-form .config-card,
+body:not(.theme-x3-dark) .params-form .config-card,
+body.theme-x3-light .params-form .page-card-group,
+body:not(.theme-x3-dark) .params-form .page-card-group,
+body.theme-x3-light .params-form .compact-group,
+body:not(.theme-x3-dark) .params-form .compact-group{background:transparent !important;border:0 !important;box-shadow:none !important;padding:0 !important;}
+body.theme-x3-light .params-form .field-block,
+body:not(.theme-x3-dark) .params-form .field-block,
+body.theme-x3-light .tool-form .field-block,
+body:not(.theme-x3-dark) .tool-form .field-block,
+body.theme-x3-light .push-field-row,
+body:not(.theme-x3-dark) .push-field-row{background:transparent !important;border-color:rgba(80,60,40,.095) !important;}
+body.theme-x3-light .raw-output.backtest-output-toggle,
+body:not(.theme-x3-dark) .raw-output.backtest-output-toggle{background:transparent !important;border:0 !important;box-shadow:none !important;}
+body.theme-x3-light .raw-output.backtest-output-toggle > summary,
+body:not(.theme-x3-dark) .raw-output.backtest-output-toggle > summary{background:linear-gradient(180deg,#faf7f3,#e8e2db) !important;border:1px solid rgba(80,60,40,.24) !important;color:var(--lt-heading) !important;box-shadow:0 8px 18px rgba(60,50,40,.065),inset 0 1px 0 rgba(255,255,255,.86) !important;}
+body.theme-x3-light #symbol-key-select.selected-symbol-select,
+body:not(.theme-x3-dark) #symbol-key-select.selected-symbol-select{background:linear-gradient(180deg,#fcfbfa,#f3f2f0) !important;border:1px solid rgba(80,60,40,.18) !important;color:#1f1914 !important;font-weight:400 !important;box-shadow:0 1px 0 rgba(255,255,255,.95),inset 0 1px 2px rgba(60,50,40,.055) !important;}
+body.theme-x3-light .theme-switch,
+body:not(.theme-x3-dark) .theme-switch,
+body.theme-x3-light .strategy-switch,
+body:not(.theme-x3-dark) .strategy-switch{background:rgba(60,50,40,.04);border-color:rgba(80,60,40,.10);}
+body.theme-x3-light .theme-switch-label,
+body:not(.theme-x3-dark) .theme-switch-label,
+body.theme-x3-light .strategy-switch-label,
+body:not(.theme-x3-dark) .strategy-switch-label{color:rgba(60,50,40,.82);}
+body.theme-x3-light .theme-slider,
+body:not(.theme-x3-dark) .theme-slider,
+body.theme-x3-light .strategy-slider,
+body:not(.theme-x3-dark) .strategy-slider{background:#d9d3cc;border-color:rgba(60,50,40,.12);}
+body.theme-x3-light #theme-toggle:checked + .theme-slider,
+body:not(.theme-x3-dark) #theme-toggle:checked + .theme-slider,
+body.theme-x3-light .strategy-switch input:checked + .strategy-slider,
+body:not(.theme-x3-dark) .strategy-switch input:checked + .strategy-slider{background:linear-gradient(135deg,#8a7a6a,#6a5c4e);border-color:rgba(60,50,40,.35);}
+body.theme-x3-light .panel-toggle-slider,
+body:not(.theme-x3-dark) .panel-toggle-slider{background:#d9d3cc;border-color:rgba(60,50,40,.12);}
+body.theme-x3-light .panel-toggle input:checked + .panel-toggle-slider,
+body:not(.theme-x3-dark) .panel-toggle input:checked + .panel-toggle-slider{background:linear-gradient(135deg,#8a7a6a,#6a5c4e);border-color:rgba(60,50,40,.35);}
+@media (max-width:640px){body.theme-x3-light .card,body:not(.theme-x3-dark) .card,body.theme-x3-light .page-card,body:not(.theme-x3-dark) .page-card{box-shadow:0 12px 26px rgba(60,50,40,.07),inset 0 1px 0 rgba(255,255,255,.86) !important;}}
+</style>
+<body class="dash-body theme-x3-dark" data-selected="{{ selected }}">
+<script>
+  (function(){
+    try{
+      var theme = localStorage.getItem('quant_dashboard_theme') || 'dark';
+      document.body.classList.toggle('theme-x3-dark', theme !== 'light');
+      document.body.classList.toggle('theme-x3-light', theme === 'light');
+      document.documentElement.setAttribute('data-quant-theme', theme);
+    }catch(e){}
+  })();
+</script>
+  <header class="topbar">
+    <div class="topbar-brand">
+      <img class="topbar-logo" src="{{ url_for('static', filename='login.png') }}" alt="">
+      <div class="topbar-title-wrap">
+        <h1>{{ app_name }}</h1>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <label class="strategy-switch" title="策略运行开关">
+        <span class="strategy-switch-label">策略</span>
+        <input id="STRATEGY_loop_enabled" name="loop_enabled" value="yes" type="checkbox" {% if strategy_settings.get('loop_enabled', 'yes') == 'yes' %}checked{% endif %} onchange="submitStrategyEnabledToggle(this)">
+        <span class="strategy-slider"></span>
+      </label>
+      <input type="hidden" name="loop_enabled" value="no">
+      <label class="theme-switch" title="切换明暗主题">
+        <span class="theme-switch-label">主题</span>
+        <input type="checkbox" id="theme-toggle" aria-label="切换明暗主题">
+        <span class="theme-slider"></span>
+      </label>
+      <a class="logout-btn" href="{{ url_for('logout') }}">退出</a>
+    </div>
+  </header>
+
+  <nav class="page-nav" aria-label="主导航" style="justify-content:center;">
+    {% for endpoint, label in nav_items.items() %}
+      <a class="page-nav-link {% if page_name == endpoint %}active{% endif %}" href="{{ url_for(endpoint ~ '_page') }}">{{ label }}</a>
+    {% endfor %}
+  </nav>
+
+  <main class="page-wrap">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <section class="card flash-stack">
+          {% for category, msg in messages %}
+            <div class="flash {{ category }}">{{ msg }}</div>
+          {% endfor %}
+        </section>
+      {% endif %}
+    {% endwith %}
+
+    {% if page_name == 'symbols' %}
+      <section class="card page-card symbols-current-card">
+        <div class="section-header">
+          <div>
+            <h2>当前标的</h2>
+          </div>
+        </div>
+        <form method="post" class="symbol-switcher-row" id="symbol-switcher-form">
+          <input type="hidden" name="action" id="symbol-form-action" value="set_symbol">
+          <div class="field-block grow symbol-select-field">
+            <label for="symbol-key-select">选择标的</label>
+            <select name="symbol_key" id="symbol-key-select" class="selected-symbol-select" data-selected="{{ selected }}" onchange="submitSymbolSelection(this)">
+              {% for card in symbol_cards %}
+              <option value="{{ card.key }}" {% if card.active %}selected{% endif %}>{{ card.label }}{% if card.symbol %} ({{ card.symbol }}){% endif %}</option>
+              {% endfor %}
+            </select>
+          </div>
+          {% if selected != 'COMMON_BACKTEST_CONFIG' %}
+            <button type="button" class="danger-btn action-btn" onclick="openSymbolDeleteDialog('{{ selected_label|e }}','{{ selected_symbol_code|e }}')">删除</button>
+          {% else %}
+            <button type="button" class="disabled-btn action-btn" disabled>删除</button>
+          {% endif %}
+        </form>
+      </section>
+
+      <section class="card page-card">
+        <div class="section-header"><h2>新增标的</h2></div>
+        <form method="post" class="symbol-editor-form">
+          <input type="hidden" name="action" value="add_symbol">
+          <div class="symbol-editor-grid">
+            <div class="field-block">
+              <label>标的名称</label>
+              <input type="text" name="new_name" placeholder="如 福耀 / 腾讯 / 陕能">
+            </div>
+            <div class="field-block">
+              <label>股票代码</label>
+              <input type="text" name="new_symbol" placeholder="如SH600660/HK00700/SZ159696">
+            </div>
+          </div>
+          <div class="symbol-action-row one-btn-row">
+            <button type="submit" class="primary-btn action-btn">新增</button>
+          </div>
+        </form>
+      </section>
+    {% endif %}
+
+    {% if page_name == 'status' %}
+      <section class="card page-card">
+        <div class="section-header between">
+          <h2>状态</h2>
+          <div class="status-action-row">
+            <form method="post" action="{{ url_for('clear_market_state_page') }}" onsubmit="return confirm('确认重置当前标的运行状态？last_price、last_trade_price、last_add_price、步进步数等会恢复初始，仅影响当前标的。');">
+              <input type="hidden" name="symbol_key" value="{{ selected }}">
+              <button type="submit" class="secondary-btn action-btn">重置</button>
+            </form>
+          </div>
+        </div>
+        <div class="status-control-row">
+          <form method="get" action="{{ url_for('status_page') }}">
+            <div class="field-block">
+              <label for="status-symbol-select">选择标的状态</label>
+              <select id="status-symbol-select" name="symbol_key" onchange="this.form.submit()">
+                {% for card in symbol_cards %}
+                  {% if card.key != 'COMMON_BACKTEST_CONFIG' %}
+                    <option value="{{ card.key }}" {% if card.active %}selected{% endif %}>{{ card.label }}{% if card.symbol %} ({{ card.symbol }}){% endif %}</option>
+                  {% endif %}
+                {% endfor %}
+              </select>
+            </div>
+          </form>
+        </div>
+        <div class="status-box"><pre>{{ status_text }}</pre></div>
+        {% if reference_prices %}
+          <div class="reference-price-grid">
+            {% for ref in reference_prices %}
+              <form method="post" action="{{ url_for('refresh_reference_price_page') }}" class="reference-price-card {% if ref.primary %}primary{% endif %} {% if not ref.ok %}error{% endif %}" title="点击刷新这个实时源">
+                <input type="hidden" name="symbol_key" value="{{ selected }}">
+                <input type="hidden" name="source_key" value="{{ ref.key }}">
+                <button type="submit" class="reference-card-button">
+                  <div class="name">{{ ref.label }}{% if ref.primary %}<span class="source-chip">当前优先</span>{% endif %}</div>
+                  <div class="price">{% if ref.ok %}{{ fmt_snapshot_value(ref.price) }}{% else %}-{% endif %}</div>
+                  <div class="meta">{{ ref.source }}{% if ref.updated_at %} · {{ ref.updated_at }}{% elif ref.date %} · {{ ref.date }}{% endif %}</div>
+                  {% if not ref.ok and ref.error %}<div class="meta">{{ ref.error }}</div>{% endif %}
+                </button>
+              </form>
+            {% endfor %}
+          </div>
+        {% endif %}
+
+        <div class="section-header between" style="margin-top:18px;">
+          <div>
+            <h2>回测/策略数据源指标</h2>
+            {% if source_metrics_updated_at %}<p class="section-note">更新时间：{{ source_metrics_updated_at }}</p>{% endif %}
+          </div>
+          <form method="post" action="{{ url_for('refresh_source_metrics_page') }}" style="margin:0;" onsubmit="return confirm('确认刷新当前回测/策略数据源指标？');">
+            <input type="hidden" name="symbol_key" value="{{ selected }}">
+            <button type="submit" class="secondary-btn action-btn">刷新</button>
+          </form>
+        </div>
+        {% if source_metrics %}
+          <div class="source-metric-grid">
+            {% for m in source_metrics %}
+              <div class="source-metric-card {% if not m.ok %}error{% endif %}">
+                <div class="name">{{ m.label }}</div>
+                {% if m.ok %}
+                  <div class="price">{{ fmt_snapshot_value(m.current_price) }}</div>
+                  <div class="metric-line">🔀MA150={{ fmt_snapshot_value(m.ma150) }}({{ m.ma150_source or '-' }}), Trend={{ fmt_snapshot_value(m.sell) }}, Clear={{ fmt_snapshot_value(m.clear) }}</div>
+                  <div class="metric-line">⏳动态K={{ fmt_snapshot_value(m.dynamic_k) }}，横盘评分={{ fmt_snapshot_value(m.sideways_score) }}</div>
+                  <div class="meta">{{ m.source }}{% if m.date %} · {{ m.date }}{% endif %} · K线{{ m.count }}{% if m.zone %} · {{ m.zone }}{% endif %}</div>
+                {% else %}
+                  <div class="price">-</div>
+                  <div class="meta">{{ m.source }}</div>
+                  {% if m.error %}<div class="meta">{{ m.error }}</div>{% endif %}
+                {% endif %}
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="section-note">点击“刷新”计算当前数据源指标。</p>
+        {% endif %}
+      </section>
+
+      <section class="card page-card">
+        <div class="section-header between">
+          <div>
+            <h2>策略快照</h2>
+            <p class="section-note">只显示今日最新一次实时策略原因；手动刷新不会覆盖真实策略判断。</p>
+          </div>
+        </div>
+
+        {% if latest_snapshot %}
+          <div class="snapshot-reason-card">{{ latest_snapshot.get('reason', '-') }}</div>
+        {% else %}
+          <p class="snapshot-empty">暂无今日实时策略状态。主程序在交易时段运行一轮后会自动生成。</p>
+        {% endif %}
+      </section>
+
+
+
+      <section class="card page-card">
+        <div class="section-header between">
+          <div>
+            <h2>最近 10 条交易快照</h2>
+            <p class="section-note">只显示真正触发交易的策略快照；NO_TRADE / REFRESH_ONLY / MONITOR_ONLY 不会进入这里。</p>
+          </div>
+          <label class="panel-toggle" title="显示或隐藏最近交易快照">
+            <span class="panel-toggle-text">显示交易快照</span>
+            <input type="checkbox" id="trade-snapshot-toggle" aria-label="显示或隐藏最近交易快照">
+            <span class="panel-toggle-slider"></span>
+          </label>
+        </div>
+        <div id="trade-snapshot-panel" class="hidden">
+        {% if recent_trade_snapshots %}
+          <div class="snapshot-table-wrap">
+            <table class="snapshot-table">
+              <thead>
+                <tr>
+                  <th>时间</th><th>源</th><th>状态</th><th>价格</th><th>MA150</th><th>区间</th><th>动作</th><th>持仓变化</th><th>原因</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in recent_trade_snapshots %}
+                  <tr>
+                    <td>{{ item.get('time', '-') }}</td>
+                    <td>{{ item.get('market_source', '-') }}</td>
+                    <td>{{ item.get('market_status', item.get('level', '-')) }}</td>
+                    <td>{{ fmt_snapshot_value(item.get('current_price')) }}</td>
+                    <td>{{ fmt_snapshot_value(item.get('ma150')) }}</td>
+                    <td>{{ item.get('zone', '-') }}</td>
+                    <td>{{ item.get('action', item.get('decision', '-')) }}</td>
+                    <td>{{ fmt_snapshot_value(item.get('current_units_before'), 4) }} → {{ fmt_snapshot_value(item.get('current_units_after', item.get('current_units')), 4) }}</td>
+                    <td class="reason-cell">{{ item.get('reason', '-') }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <p class="snapshot-empty">暂无历史真实交易快照。</p>
+        {% endif %}
+        </div>
+      </section>
+
+      <section class="card page-card">
+        <div class="section-header between">
+          <div>
+            <h2>交易前状态回滚点</h2>
+            <p class="section-note">保留真实交易前状态，误触发时可回滚。</p>
+          </div>
+          <label class="panel-toggle" title="显示或隐藏交易前状态回滚点">
+            <span class="panel-toggle-text">显示回滚点</span>
+            <input type="checkbox" id="rollback-toggle" aria-label="显示或隐藏交易前状态回滚点">
+            <span class="panel-toggle-slider"></span>
+          </label>
+        </div>
+        <div id="rollback-panel" class="hidden">
+        {% if trade_state_backups %}
+          <div class="snapshot-table-wrap">
+            <table class="snapshot-table">
+              <thead>
+                <tr><th>时间</th><th>方向</th><th>价格</th><th>数量</th><th>持仓变化</th><th>区间</th><th>原因</th><th>操作</th></tr>
+              </thead>
+              <tbody>
+                {% for item in trade_state_backups %}
+                  <tr>
+                    <td>{{ item.get('time', '-') }}</td>
+                    <td>{{ item.get('side', '-') }}</td>
+                    <td>{{ fmt_snapshot_value(item.get('price')) }}</td>
+                    <td>{{ fmt_snapshot_value(item.get('qty'), 4) }}</td>
+                    <td>{{ fmt_snapshot_value(item.get('pos_before'), 4) }} → {{ fmt_snapshot_value(item.get('pos_after'), 4) }}</td>
+                    <td>{{ item.get('zone', '-') }}</td>
+                    <td class="reason-cell">{{ item.get('reason', '-') }}</td>
+                    <td>
+                      <form method="post" action="{{ url_for('restore_trade_state_page') }}" onsubmit="return confirm('确认恢复到该交易前状态？这会覆盖当前标的运行状态和 quant.yaml 中的 current_units/current_avg_cost；交易时段内恢复后会立即按当前价重跑一次策略，可能触发交易。');">
+                        <input type="hidden" name="symbol_key" value="{{ selected }}">
+                        <input type="hidden" name="backup_id" value="{{ item.get('id', '') }}">
+                        <button type="submit" class="rollback-btn">恢复到此状态</button>
+                      </form>
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <p class="rollback-note">恢复会同步交易前状态；交易时段内会立即按当前价重跑一次策略，可能触发交易。</p>
+        {% else %}
+          <p class="snapshot-empty">暂无当前标的的交易前状态回滚点。只有真实 TRADE 触发前才会自动生成。</p>
+        {% endif %}
+        </div>
+      </section>
+
+      <section class="card page-card">
+        <div class="section-header between">
+          <div>
+            <h2>行情源成功率统计</h2>
+            <p class="section-note">按今日实时快照统计行情源成功率，数据每天自动切换。</p>
+          </div>
+          <label class="panel-toggle" title="显示或隐藏行情源成功率统计">
+            <span class="panel-toggle-text">显示统计</span>
+            <input type="checkbox" id="source-stats-toggle" aria-label="显示或隐藏行情源成功率统计">
+            <span class="panel-toggle-slider"></span>
+          </label>
+        </div>
+        <div id="source-stats-panel" class="hidden">
+        {% if market_source_stats %}
+          <div class="snapshot-table-wrap">
+            <table class="snapshot-table">
+              <thead>
+                <tr><th>行情源</th><th>总次数</th><th>OK</th><th>WARN</th><th>ERROR</th><th>跳过</th><th>成功率</th></tr>
+              </thead>
+              <tbody>
+                {% for row in market_source_stats %}
+                  <tr>
+                    <td>{{ row.source }}</td>
+                    <td>{{ row.total }}</td>
+                    <td>{{ row.ok }}</td>
+                    <td>{{ row.warn }}</td>
+                    <td>{{ row.error }}</td>
+                    <td>{{ row.skip }}</td>
+                    <td>{{ row.success_rate }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <p class="snapshot-empty">暂无今日行情源统计。</p>
+        {% endif %}
+        </div>
+      </section>
+    {% endif %}
+
+    {% if page_name == 'params' %}
+      <section class="card page-card">
+        <form method="post" action="{{ url_for('params_page') }}" id="params-form" class="params-form">
+          <input type="hidden" name="action" value="save_params">
+          <div class="section-header between">
+            <h2>参数{% if selected_label %} - {{ selected_label }}{% endif %}</h2>
+            <button type="button" id="params-edit-btn" class="primary-btn action-btn" data-mode="edit" onclick="toggleParamsEdit(this)">修改</button>
+          </div>
+          <section class="page-card-group compact-group">
+            {% for group in grouped_fields %}
+              <div class="config-card param-group-{{ group['id'] }}{% if group['title'] == '基础信息' %} params-basic-info-flat{% endif %}">
+                {% if group['title'] != '基础信息' %}
+                  <div class="subsection-title">{{ group['title'] }}</div>
+                {% endif %}
+                <div class="form-grid">
+                  {% for field in group['items'] %}
+                    <div class="field-block readonly-block">
+                      <label>
+                        {{ field['label'] }}
+                        {% if field['help'] %}
+                          <button type="button" class="help-btn" aria-label="参数说明" onclick="toggleHelp(this)">?</button>
+                        {% endif %}
+                      </label>
+                      {% if field['help'] %}
+                        <div class="help-popover hidden">{{ field['help'] }}</div>
+                      {% endif %}
+                      {% if field['type'] == 'select' or field['options'] %}
+                        <select name="{{ field['key'] }}" disabled data-lock="1">
+                          {% for opt_value, opt_label in field['options'] %}
+                            <option value="{{ opt_value }}" {% if field['value'] == opt_value %}selected{% endif %}>{{ opt_label }}</option>
+                          {% endfor %}
+                        </select>
+                      {% else %}
+                        <input type="text" name="{{ field['key'] }}" value="{{ field['value'] }}" readonly data-lock="1">
+                      {% endif %}
+                    </div>
+                  {% endfor %}
+                </div>
+              </div>
+            {% endfor %}
+          </section>
+        </form>
+      </section>
+    {% endif %}
+
+    {% if page_name == 'backtest' %}
+      <section class="card page-card">
+        <div class="section-header"><h2>回测{% if selected_label %} - {{ selected_label }}{% endif %}</h2></div>
+        <form method="post" action="{{ url_for('backtest_page') }}" class="tool-form">
+          <input type="hidden" name="action" value="run_backtest">
+          <div class="form-grid compact-grid">
+            <div class="field-block">
+              <label>股票代码</label>
+              <input type="text" name="bt_symbol" value="{{ bt_symbol_default }}" placeholder="如SH600660/HK00700/SZ159696">
+            </div>
+            <div class="field-block">
+              <label>回测天数</label>
+              <input type="text" name="bt_days" value="800">
+            </div>
+            <div class="field-block">
+              <label>初始仓位</label>
+              <input type="text" name="bt_initial_units" value="{{ bt_initial_default }}">
+              <p class="backtest-initial-note">仅用于回测第一交易日的临时 current_units，默认 5%；不覆盖策略中的长期底仓、补仓初始仓位或加仓倍数。</p>
+            </div>
+          </div>
+          <div class="inline-actions backtest-run-actions">
+            <button type="submit" class="primary-btn action-btn">执行回测</button>
+            <button type="button" class="backtest-run-help-btn return-help-style" aria-label="收益计算说明" title="收益计算说明" onclick="toggleReturnCalcHelp()">?</button>
+          </div>
+          <div id="return-calc-help" class="return-help-panel hidden" role="note" aria-label="收益计算说明">
+            <h3>回测收益计算口径</h3>
+            <h4>价格和参数选用</h4>
+            <ul>
+              <li>信号、MA150、区间判断使用复权价 <code>Adj Close</code>。</li>
+              <li>成交、估值、成本、最新价格和收益计算使用原始价 <code>Close</code>。</li>
+              <li>百分比模式下，<code>qty / units</code> 表示仓位比例或成本权重，不是股数。</li>
+              <li>历史回测初始成本使用回测窗口第一天原始价；<code>current_avg_cost</code> 只用于实盘监控。</li>
+              <li>累计投入仓位 = 回测起始持仓 + 回测期间所有买入仓位之和。</li>
+            </ul>
+            <h4>收益率计算</h4>
+            <ul>
+              <li>分红收益率 = 分红现金贡献 ÷ 累计投入仓位；分红按除息日、按当时持仓比例入账。</li>
+              <li>交易实现收益率 = 已实现卖出收益贡献 ÷ 累计投入仓位；卖出收益贡献 = 卖出仓位 × (卖出原始价 ÷ 当时持仓成本 - 1)。</li>
+              <li>持仓收益率 = 期末浮盈贡献 ÷ 累计投入仓位；期末浮盈贡献 = 期末市值权重 - 期末剩余持仓成本权重，不含分红和已实现收益摊薄。</li>
+              <li>综合收益率 = 分红收益率 + 交易实现收益率 + 持仓收益率 = 总收益贡献 ÷ 累计投入仓位。</li>
+              <li>摊薄后持仓成本会把分红现金贡献和已实现交易收益贡献摊回期末剩余持仓成本；若收益已覆盖原始成本，页面允许按负成本展示。</li>
+              <li>期末持仓收益率按程序当前口径计算；摊薄后持仓成本可显示为负数，但负成本只作为展示，不反向影响综合收益率、分红收益率、交易实现收益率和持仓收益率。</li>
+            </ul>
+          </div>
+        </form>
+
+        {% if backtest_cards %}
+          <div class="summary-list backtest-summary-list">
+            {% for label, value in backtest_cards %}
+              <div class="summary-line"><span class="summary-label">{{ label }}：</span><span class="summary-value">{{ value }}</span></div>
+            {% endfor %}
+          </div>
+        {% endif %}
+
+        <!-- 修改：遍历所有回测生成的文件，显示下载链接 -->
+        {% if backtest_files %}
+          <div class="artifact-row">
+            {% for file_key, file_info in backtest_files.items() %}
+              <a class="artifact-btn" href="{{ file_info.url }}">下载 {{ file_info.name }}</a>
+            {% endfor %}
+          </div>
+        {% endif %}
+
+        <div class="section-header subhead raw-head">
+          <h3>原始输出</h3>
+          <button type="button" class="help-btn large" aria-label="说明" onclick="toggleBacktestHelp()">?</button>
+        </div>
+        <div id="backtest-help" class="help-panel hidden"><pre>{{ backtest_help_text }}</pre></div>
+        <details class="raw-output backtest-output-toggle" {% if backtest_output %}open{% endif %}>
+          <summary><span class="toggle-open-label">查看回测输出</span><span class="toggle-close-label">收起回测输出</span></summary>
+          <div class="output-box"><pre>{{ backtest_output or '这里会显示回测输出。' }}</pre></div>
+        </details>
+      </section>
+    {% endif %}
+
+    {% if page_name == 'push' %}
+      <section class="card page-card">
+        <div class="section-header between">
+          <div>
+            <h2>行情源设置</h2>
+            <p class="section-note">系统配置文件：{{ system_config_path }}。选择后会作为对应市场的第一优先行情源，后续源自动作为备用。</p>
+          </div>
+          <label class="panel-toggle" title="显示或隐藏行情源设置">
+            <span class="panel-toggle-text">显示配置</span>
+            <input type="checkbox" id="system-config-toggle" checked aria-label="显示或隐藏行情源设置">
+            <span class="panel-toggle-slider"></span>
+          </label>
+        </div>
+        <div id="system-config-panel">
+        <form method="post" action="{{ url_for('push_page') }}" class="push-config-form" id="system-config-form">
+          <input type="hidden" name="action" value="save_system">
+          <div class="push-config-grid">
+            <div class="push-field-row">
+              <div>
+                <label for="A_QUOTE_SOURCE">A股 / ETF 实时数据源</label>
+                <div class="push-field-help">用于盘中当前价，选中的源会优先使用；历史 K 线仍按行情层备用顺序获取。</div>
+              </div>
+              <div>
+                <select id="A_QUOTE_SOURCE" name="A_QUOTE_SOURCE" disabled data-system-lock="1">
+                  {% for opt_value, opt_label in system_select_options.get('A_QUOTE_SOURCE', []) %}
+                    <option value="{{ opt_value }}" {% if system_config.get('A_QUOTE_SOURCE', '') == opt_value %}selected{% endif %}>{{ opt_label }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+            </div>
+            <div class="push-field-row">
+              <div>
+                <label for="HK_MARKET_SOURCE">港股行情源</label>
+                <div class="push-field-help">用于港股日 K / 最新价口径，选中的源会优先使用。</div>
+              </div>
+              <div>
+                <select id="HK_MARKET_SOURCE" name="HK_MARKET_SOURCE" disabled data-system-lock="1">
+                  {% for opt_value, opt_label in system_select_options.get('HK_MARKET_SOURCE', []) %}
+                    <option value="{{ opt_value }}" {% if system_config.get('HK_MARKET_SOURCE', '') == opt_value %}selected{% endif %}>{{ opt_label }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+            </div>
+            <div class="push-field-row">
+              <div>
+                <label for="A_BACKTEST_SOURCE">A股 / ETF 回测/策略数据源</label>
+              </div>
+              <div>
+                <select id="A_BACKTEST_SOURCE" name="A_BACKTEST_SOURCE" disabled data-system-lock="1">
+                  {% for opt_value, opt_label in system_select_options.get('A_BACKTEST_SOURCE', []) %}
+                    <option value="{{ opt_value }}" {% if system_config.get('A_BACKTEST_SOURCE', '') == opt_value %}selected{% endif %}>{{ opt_label }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+            </div>
+            <div class="push-field-row">
+              <div>
+                <label for="HK_BACKTEST_SOURCE">港股回测/策略数据源</label>
+              </div>
+              <div>
+                <select id="HK_BACKTEST_SOURCE" name="HK_BACKTEST_SOURCE" disabled data-system-lock="1">
+                  {% for opt_value, opt_label in system_select_options.get('HK_BACKTEST_SOURCE', []) %}
+                    <option value="{{ opt_value }}" {% if system_config.get('HK_BACKTEST_SOURCE', '') == opt_value %}selected{% endif %}>{{ opt_label }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+            </div>
+            <div class="push-field-row">
+              <div>
+                <label for="XUEQIU_TOKEN">雪球 API Token / Cookie</label>
+                <div class="push-field-help">选择雪球源时使用。可填写 xq_a_token，也可粘贴完整 Cookie</div>
+              </div>
+              <div>
+                <input id="XUEQIU_TOKEN" name="XUEQIU_TOKEN" type="text" autocomplete="off" readonly data-system-lock="1" value="{{ system_config.get('XUEQIU_TOKEN', '') }}">
+              </div>
+            </div>
+          </div>
+          <div class="push-action-row">
+            <button type="button" id="system-edit-btn" class="primary-btn action-btn" data-mode="edit" onclick="toggleSystemEdit(this)">修改</button>
+          </div>
+        </form>
+        </div>
+      </section>
+
+      <section class="card page-card strategy-settings-card">
+        <div class="section-header between">
+          <div>
+            <h2>系统运行设置</h2>
+            <p class="section-note">写入 quant.yaml 的 STRATEGY 区块；保存后主程序会在下一轮循环即时读取。</p>
+          </div>
+          <div style="display:flex;align-items:center;gap:14px;">
+            <label class="panel-toggle" title="显示或隐藏系统运行设置">
+              <span class="panel-toggle-text">显示配置</span>
+              <input type="checkbox" id="strategy-config-toggle" checked aria-label="显示或隐藏系统运行设置">
+              <span class="panel-toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+        <div id="strategy-config-panel">
+          <form method="post" action="{{ url_for('push_page') }}" class="push-config-form" id="strategy-config-form">
+            <input type="hidden" name="action" value="save_strategy">
+            <div class="push-config-grid">
+              {% for item in strategy_fields %}
+                {% if item.key != 'loop_enabled' %}
+                <div class="push-field-row strategy-field-{{ item.key|lower }}">
+                  <div>
+                    <label for="STRATEGY_{{ item.key }}">{{ item.label }}</label>
+                    {% if item.help %}<div class="push-field-help">{{ item.help }}</div>{% endif %}
+                  </div>
+                  <div>
+                    <input id="STRATEGY_{{ item.key }}" name="{{ item.key }}" type="{{ item.type }}" value="{{ strategy_settings.get(item.key, '') }}" readonly data-strategy-lock="1" autocomplete="off">
+                  </div>
+                </div>
+                {% endif %}
+              {% endfor %}
+            </div>
+            <div class="push-action-row">
+              <button type="button" id="strategy-edit-btn" class="primary-btn action-btn" data-mode="edit" onclick="toggleStrategyEdit(this)">修改</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <section class="card page-card">
+        <div class="section-header between">
+          <div>
+            <h2>推送配置</h2>
+            <p class="section-note">配置文件：{{ push_config_path }}</p>
+          </div>
+          <label class="panel-toggle" title="显示或隐藏推送配置">
+            <span class="panel-toggle-text">显示配置</span>
+            <input type="checkbox" id="push-config-toggle" checked aria-label="显示或隐藏推送配置">
+            <span class="panel-toggle-slider"></span>
+          </label>
+        </div>
+        <div id="push-config-panel" class="push-config-layout">
+          <form method="post" action="{{ url_for('push_page') }}" class="push-config-form" id="push-config-form">
+            <input type="hidden" name="action" value="save_push">
+            <div class="push-config-grid">
+              {% for item in push_fields %}
+                <div class="push-field-row push-field-{{ item.key|lower }}" data-push-channel="{{ item.channel }}">
+                  <div>
+                    <label for="{{ item.key }}">{{ item.label }}</label>
+                    {% if item.help %}<div class="push-field-help">{{ item.help }}</div>{% endif %}
+                  </div>
+                  <div>
+                    {% if item.type == 'select' %}
+                      <select id="{{ item.key }}" name="{{ item.key }}" disabled data-push-lock="1" {% if item.key == 'PUSH_CHANNEL' %}onchange="refreshPushChannelFields()"{% endif %}>
+                        {% for opt_value, opt_label in push_select_options.get(item.key, []) %}
+                          <option value="{{ opt_value }}" {% if push_config.get(item.key, '') == opt_value %}selected{% endif %}>{{ opt_label }}</option>
+                        {% endfor %}
+                      </select>
+                    {% elif item.type == 'switch' %}
+                      <label class="panel-toggle push-enable-switch" title="拨动后立即保存并生效">
+                        <input id="{{ item.key }}" name="{{ item.key }}" value="yes" type="checkbox" {% if push_config.get(item.key, 'yes') == 'yes' %}checked{% endif %} onchange="submitPushEnabledToggle(this)">
+                        <span class="panel-toggle-slider"></span>
+                        <span class="panel-toggle-text">{{ '已启用' if push_config.get(item.key, 'yes') == 'yes' else '已关闭' }}</span>
+                      </label>
+                      <input type="hidden" name="{{ item.key }}" value="no">
+                    {% else %}
+                      <input id="{{ item.key }}" name="{{ item.key }}" type="{{ item.type }}" value="{{ push_config.get(item.key, '') }}" autocomplete="off" readonly data-push-lock="1">
+                    {% endif %}
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+            <div class="push-action-row">
+              <button type="button" id="push-edit-btn" class="primary-btn action-btn" data-mode="edit" onclick="togglePushEdit(this)">修改</button>
+              <button type="submit" class="primary-btn action-btn" form="push-test-form">发送测试推送</button>
+            </div>
+          </form>
+          <form method="post" action="{{ url_for('push_page') }}" id="push-test-form" class="push-test-inline">
+            <input type="hidden" name="action" value="test_push">
+          </form>
+        </div>
+      </section>
+
+      <section class="card page-card push-log-card">
+        <div class="section-header between">
+          <div>
+            <h2>推送日志</h2>
+            <p class="section-note">显示 {{ push_log_path }} 最新 30 条。</p>
+          </div>
+          <div class="section-actions push-log-actions">
+            <form method="post" action="{{ url_for('push_page') }}" onsubmit="return confirm('确认清空所有推送日志记录？');">
+              <input type="hidden" name="action" value="clear_push_log">
+              <button type="submit" class="push-log-clear-btn">清除</button>
+            </form>
+            <label class="panel-toggle" title="显示或隐藏推送日志">
+              <span class="panel-toggle-text">显示日志</span>
+              <input type="checkbox" id="push-log-toggle" checked aria-label="显示或隐藏推送日志">
+              <span class="panel-toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+        <div id="push-log-panel">
+          {% if push_log_entries %}
+            <div class="push-log-list">
+              {% for item in push_log_entries %}
+                <div class="push-log-item">
+                  <div class="push-log-summary-row">
+                    <span class="push-log-summary-text">{{ item.summary }}</span>
+                    {% if item.can_view %}<button type="button" class="push-log-view-btn" onclick="togglePushLogDetail('{{ item.id }}')">查看</button>{% endif %}
+                  </div>
+                  {% if item.can_view %}<pre id="{{ item.id }}" class="push-log-detail hidden">{{ item.detail }}</pre>{% endif %}
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="push-log-empty">暂无推送日志。</div>
+          {% endif %}
+        </div>
+      </section>
+    {% endif %}
+
+  </main>
+  <div id="symbol-delete-modal" class="simple-modal hidden" onclick="if(event.target===this){closeSymbolDeleteDialog();}">
+    <div class="simple-modal-card">
+      <div class="simple-modal-title">删除确认</div>
+      <div class="simple-modal-text" id="symbol-delete-text">确认删除当前标的？</div>
+      <div class="simple-modal-actions">
+        <button type="button" class="simple-modal-cancel" onclick="closeSymbolDeleteDialog()">取消</button>
+        <button type="button" class="simple-modal-ok" onclick="confirmSymbolDelete()">确定</button>
+      </div>
+    </div>
+  </div>
+
+
+  <script>
+    function toggleHelp(btn){
+      const box = btn.closest('.field-block').querySelector('.help-popover');
+      if(box){ box.classList.toggle('hidden'); }
+    }
+    function toggleParamsEdit(btn){
+      const form = document.getElementById('params-form');
+      const mode = btn.dataset.mode || 'edit';
+      if(mode === 'edit'){
+        form.querySelectorAll('[data-lock="1"]').forEach(function(el){ el.removeAttribute('readonly'); el.removeAttribute('disabled'); });
+        form.classList.add('editing');
+        btn.dataset.mode = 'save';
+        btn.textContent = '保存';
+      }else{
+        form.submit();
+      }
+    }
+    function toggleBacktestHelp(){
+      const panel = document.getElementById('backtest-help');
+      if(panel){ panel.classList.toggle('hidden'); }
+    }
+    function toggleReturnCalcHelp(){
+      const panel = document.getElementById('return-calc-help');
+      if(panel){ panel.classList.toggle('hidden'); }
+    }
+
+    function toggleSystemEdit(btn){
+      const form = document.getElementById('system-config-form');
+      if(!form || !btn){ return; }
+      const mode = btn.dataset.mode || 'edit';
+      if(mode === 'edit'){
+        form.querySelectorAll('[data-system-lock="1"]').forEach(function(el){ el.removeAttribute('readonly'); el.removeAttribute('disabled'); });
+        form.classList.add('editing');
+        btn.dataset.mode = 'save';
+        btn.textContent = '保存';
+      }else{
+        form.submit();
+      }
+    }
+
+    function toggleStrategyEdit(btn){
+      const form = document.getElementById('strategy-config-form');
+      if(!form || !btn){ return; }
+      const mode = btn.dataset.mode || 'edit';
+      if(mode === 'edit'){
+        form.querySelectorAll('[data-strategy-lock="1"]').forEach(function(el){ el.removeAttribute('readonly'); el.removeAttribute('disabled'); });
+        form.classList.add('editing');
+        btn.dataset.mode = 'save';
+        btn.textContent = '保存';
+      }else{
+        form.submit();
+      }
+    }
+
+    function togglePushLogDetail(id){
+      const el = document.getElementById(id);
+      if(el){ el.classList.toggle('hidden'); }
+    }
+
+    function togglePushEdit(btn){
+      const form = document.getElementById('push-config-form');
+      if(!form || !btn){ return; }
+      const mode = btn.dataset.mode || 'edit';
+      if(mode === 'edit'){
+        form.querySelectorAll('[data-push-lock="1"]').forEach(function(el){ el.removeAttribute('readonly'); el.removeAttribute('disabled'); });
+        form.classList.add('editing');
+        btn.dataset.mode = 'save';
+        btn.textContent = '保存';
+      }else{
+        form.submit();
+      }
+    }
+    function submitPushEnabledToggle(el){
+      const form = document.getElementById('push-config-form');
+      const label = el ? el.closest('.panel-toggle') : null;
+      const text = label ? label.querySelector('.panel-toggle-text') : null;
+      if(text){ text.textContent = el && el.checked ? '已启用' : '已关闭'; }
+      if(form){ form.submit(); }
+    }
+    function submitStrategyEnabledToggle(el){
+      const form = document.getElementById('strategy-config-form');
+      const label = el ? el.closest('.panel-toggle') : null;
+      const text = label ? label.querySelector('.panel-toggle-text') : null;
+      if(text){ text.textContent = el && el.checked ? '已启用' : '已关闭'; }
+      // 如果开关在顶栏（不在 strategy-config-form 内），用 fetch 提交
+      if(!form || !form.contains(el)){
+        const data = new URLSearchParams();
+        data.set('action', 'save_strategy');
+        data.set('loop_enabled', el && el.checked ? 'yes' : 'no');
+        fetch('{{ url_for("push_page") }}', {method:'POST', body: data}).then(function(){ location.reload(); });
+        return;
+      }
+      // 已在 strategy-config-form 内的开关
+      form.querySelectorAll('[data-strategy-lock="1"]').forEach(function(el){ el.removeAttribute('readonly'); el.removeAttribute('disabled'); });
+      form.submit();
+    }
+    function refreshPushChannelFields(){
+      const selector = document.getElementById('PUSH_CHANNEL');
+      const channel = selector ? (selector.value || 'gotify') : 'gotify';
+      const visible = {
+        base: true,
+        gotify: channel === 'gotify',
+        ntfy: channel === 'ntfy'
+      };
+      document.querySelectorAll('[data-push-channel]').forEach(function(row){
+        const key = row.getAttribute('data-push-channel') || 'base';
+        row.classList.toggle('channel-hidden', !visible[key]);
+      });
+    }
+
+    function bindPanelToggle(toggleId, panelId, storageKey){
+      const toggle = document.getElementById(toggleId);
+      const panel = document.getElementById(panelId);
+      if(!toggle || !panel){ return; }
+      const saved = localStorage.getItem(storageKey);
+      if(saved === 'hidden'){ toggle.checked = false; panel.classList.add('hidden'); }
+      if(saved === 'shown'){ toggle.checked = true; panel.classList.remove('hidden'); }
+      toggle.addEventListener('change', function(){
+        panel.classList.toggle('hidden', !toggle.checked);
+        localStorage.setItem(storageKey, toggle.checked ? 'shown' : 'hidden');
+      });
+    }
+  
+function markSymbolSelectionChanged(el){
+  if(!el){ return; }
+  const selected = (el.getAttribute('data-selected') || '').trim();
+  const current = (el.value || '').trim();
+  el.classList.remove('selected-symbol-pending','selected-symbol-select');
+  if(current && current === selected){
+    el.classList.add('selected-symbol-select');
+  }else{
+    el.classList.add('selected-symbol-pending');
+  }
+}
+function submitSymbolSelection(el){
+  if(!el || !el.form){ return; }
+  markSymbolSelectionChanged(el);
+  const action = document.getElementById('symbol-form-action');
+  if(action){ action.value = 'set_symbol'; }
+  el.form.submit();
+}
+function openSymbolDeleteDialog(label, code){
+  const modal = document.getElementById('symbol-delete-modal');
+  const text = document.getElementById('symbol-delete-text');
+  if(!modal || !text){ return; }
+  const suffix = code ? ` (${code})` : '';
+  text.textContent = `确认删除当前选定标的：${label}${suffix} ？`;
+  modal.classList.remove('hidden');
+  modal.classList.add('show');
+}
+function closeSymbolDeleteDialog(){
+  const modal = document.getElementById('symbol-delete-modal');
+  if(!modal){ return; }
+  modal.classList.remove('show');
+  modal.classList.add('hidden');
+}
+function confirmSymbolDelete(){
+  const form = document.getElementById('symbol-switcher-form');
+  const action = document.getElementById('symbol-form-action');
+  if(!form || !action){ return; }
+  action.value = 'delete_symbol';
+  form.submit();
+}
+
+
+function applyTheme(theme){
+  const dark = theme !== 'light';
+  document.body.classList.toggle('theme-x3-dark', dark);
+  document.body.classList.toggle('theme-x3-light', !dark);
+  document.documentElement.setAttribute('data-quant-theme', dark ? 'dark' : 'light');
+  const toggle = document.getElementById('theme-toggle');
+  if(toggle){ toggle.checked = dark; }
+}
+function initThemeToggle(){
+  const saved = localStorage.getItem('quant_dashboard_theme') || 'dark';
+  applyTheme(saved);
+  const toggle = document.getElementById('theme-toggle');
+  if(toggle){
+    toggle.addEventListener('change', function(){
+      const theme = toggle.checked ? 'dark' : 'light';
+      localStorage.setItem('quant_dashboard_theme', theme);
+      applyTheme(theme);
+    });
+  }
+}
+
+document.addEventListener('DOMContentLoaded', function(){
+  initThemeToggle();
+  const symbolSelect = document.getElementById('symbol-key-select');
+  if(symbolSelect){ markSymbolSelectionChanged(symbolSelect); }
+  refreshPushChannelFields();
+  bindPanelToggle('system-config-toggle', 'system-config-panel', 'quant_system_config_panel');
+  bindPanelToggle('strategy-config-toggle', 'strategy-config-panel', 'quant_strategy_config_panel');
+  bindPanelToggle('push-config-toggle', 'push-config-panel', 'quant_push_config_panel');
+  bindPanelToggle('push-log-toggle', 'push-log-panel', 'quant_push_log_panel');
+  bindPanelToggle('trade-snapshot-toggle', 'trade-snapshot-panel', 'quant_status_trade_snapshot_panel_' + (document.body.dataset.selected || 'default'));
+  bindPanelToggle('rollback-toggle', 'rollback-panel', 'quant_status_rollback_panel_' + (document.body.dataset.selected || 'default'));
+  bindPanelToggle('source-stats-toggle', 'source-stats-panel', 'quant_status_source_stats_panel_' + (document.body.dataset.selected || 'default'));
+});
+
+</script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+{
+  "A_QUOTE_SOURCE": "live_a1",
+  "HK_MARKET_SOURCE": "live_hk1",
+  "A_BACKTEST_SOURCE": "historical_a1",
+  "HK_BACKTEST_SOURCE": "historical_hk1",
+  "XUEQIU_TOKEN": "097b1fa54071cb98c38484e0208841e168514703",
+  "XUEQIU_TOKEN_UPDATED_AT": "",
+  "XUEQIU_TOKEN_SOURCE": ""
+}
