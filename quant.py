@@ -3053,7 +3053,8 @@ def main_loop():
                 logging.info(snapshot)
                 logging.info("=" * 60)
                 try:
-                    send_notification(snapshot)
+                    snapshot_title = "每日快照"
+                    send_notification(snapshot, title=snapshot_title)
                     logging.info("✅ 每日快照推送成功")
                 except Exception as e:
                     logging.error(f"❌ 推送每日快照失败: {e}")
@@ -3240,8 +3241,18 @@ def main_loop():
             logging.info("=" * 60)
             logging.info(body)
             try:
+                # 从第一条消息提取标题信息
+                first_msg = all_trade_msgs[0] if all_trade_msgs else ""
+                import re
+                symbol_match = re.search(r'【(.+?)】', first_msg)
+                trade_match = re.search(r'🗞交易: (.+?)(?:\n|$)', first_msg)
+
+                if symbol_match and trade_match:
+                    trade_title = f"🎯[TRADE]{symbol_match.group(0)} 🗞交易: {trade_match.group(1).strip()}"
+                else:
+                    trade_title = "🎯[TRADE]"
                 record_push_detail("trade", body)
-                send_notification(body)
+                send_notification(body, title=trade_title)
                 logging.info("✅ 买卖信号推送成功")
             except Exception:
                 logging.exception("❌ 推送买卖信号失败")
