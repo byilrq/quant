@@ -3052,21 +3052,31 @@ def main_loop():
                 logging.info("=" * 60)
                 logging.info(snapshot)
                 logging.info("=" * 60)
-                try:
-                    snapshot_title = "每日快照"
-                    send_notification(snapshot, title=snapshot_title)
-                    logging.info("✅ 每日快照推送成功")
-                except Exception as e:
-                    logging.error(f"❌ 推送每日快照失败: {e}")
 
                 state["_meta"]["last_log_rotate_date"] = now.date().isoformat()
-                state["_meta"]["last_daily_push_date"] = now.date().isoformat()
                 save_state(state)
 
                 logging.info("=" * 60)
-                logging.info("✅ 日志轮转与快照推送完成")
-                logging.info("🕒 下次轮转时间: 明天 09:00")
+                logging.info("✅ 日志轮转完成")
                 logging.info("=" * 60)
+
+        if should_do_daily_push(state, now):
+            snapshot = build_daily_snapshot(state)
+            logging.info("=" * 60)
+            logging.info("📌每日快照内容:")
+            logging.info("=" * 60)
+            logging.info(snapshot)
+            logging.info("=" * 60)
+            try:
+                snapshot_sent = send_notification(snapshot, title="每日快照")
+                if snapshot_sent:
+                    logging.info("✅ 每日快照推送成功")
+                else:
+                    logging.error("❌ 每日快照推送失败")
+            except Exception as e:
+                logging.error(f"❌ 推送每日快照失败: {e}")
+            state["_meta"]["last_daily_push_date"] = now.date().isoformat()
+            save_state(state)
 
         # 策略运行总开关（STRATEGY.loop_enabled）
         if str(STRATEGY.get("loop_enabled", "yes") or "yes").strip().lower() not in ("yes", "1", "true", "on"):
@@ -3161,8 +3171,11 @@ def main_loop():
                 logging.info("=" * 60)
                 logging.info(body)
                 try:
-                    send_notification(body)
-                    logging.info("✅ 回滚后重跑交易推送成功")
+                    trade_sent = send_notification(body)
+                    if trade_sent:
+                        logging.info("✅ 回滚后重跑交易推送成功")
+                    else:
+                        logging.error("❌ 回滚后重跑交易推送失败")
                 except Exception as e:
                     logging.error(f"❌ 回滚后重跑交易推送失败: {e}")
             if restore_error_msgs:
@@ -3252,8 +3265,11 @@ def main_loop():
                 else:
                     trade_title = "🎯[TRADE]"
                 record_push_detail("trade", body)
-                send_notification(body, title=trade_title)
-                logging.info("✅ 买卖信号推送成功")
+                trade_sent = send_notification(body, title=trade_title)
+                if trade_sent:
+                    logging.info("✅ 买卖信号推送成功")
+                else:
+                    logging.error("❌ 买卖信号推送失败")
             except Exception:
                 logging.exception("❌ 推送买卖信号失败")
             logging.info("=" * 60)
@@ -3267,8 +3283,11 @@ def main_loop():
             logging.info(body)
             try:
                 record_push_detail("market_error", body)
-                send_notification(body)
-                logging.info("✅ 行情错误推送成功")
+                error_sent = send_notification(body)
+                if error_sent:
+                    logging.info("✅ 行情错误推送成功")
+                else:
+                    logging.error("❌ 行情错误推送失败")
             except Exception:
                 logging.exception("❌ 推送行情错误失败")
             logging.info("=" * 60)
