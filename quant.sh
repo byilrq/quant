@@ -238,17 +238,25 @@ ACME_NGINX
 issue_cert_standalone() {
     local cert_domain="$1"
     echo "webroot 方式失败，尝试 standalone 方式申请证书..."
-    ${SUDO} systemctl stop nginx 2>/dev/null || true
+    local nginx_was_running=0
+    if systemctl is-active --quiet nginx 2>/dev/null; then
+        nginx_was_running=1
+        echo "暂停 nginx 服务以释放 80 端口..."
+        ${SUDO} systemctl stop nginx 2>/dev/null || true
+    fi
     ${SUDO} systemctl stop apache2 2>/dev/null || true
     ${SUDO} systemctl stop caddy 2>/dev/null || true
     sleep 2
     if ss -lnt 2>/dev/null | awk '{print $4}' | grep -qE '(^|:)80$'; then
         echo "❌ 80 端口仍被占用，无法使用 standalone 方式申请证书。"
         ss -lntp 2>/dev/null | grep -E '(^|:)80 ' || true
-        ${SUDO} systemctl start nginx 2>/dev/null || true
+        [ "$nginx_was_running" -eq 1 ] && ${SUDO} systemctl start nginx 2>/dev/null || true
         return 1
     fi
     ${SUDO} certbot certonly --standalone --non-interactive --agree-tos --register-unsafely-without-email -d "$cert_domain"
+    local ret=$?
+    [ "$nginx_was_running" -eq 1 ] && ${SUDO} systemctl start nginx 2>/dev/null || true
+    return $ret
 }
 
 prepare_web_cert_for_domain() {
@@ -278,13 +286,10 @@ prepare_web_cert_for_domain() {
         :
     else
         issue_cert_standalone "$cert_domain" || {
-            ${SUDO} systemctl start nginx 2>/dev/null || true
             echo "❌ Let's Encrypt 证书申请失败。请检查域名解析、80端口、防火墙/安全组。"
             return 1
         }
     fi
-
-    ${SUDO} systemctl start nginx 2>/dev/null || true
 
     if cert_files_exist "$cert_domain" && cert_is_valid "$cert_domain" && cert_key_matches "$cert_domain"; then
         echo "✅ Let's Encrypt 证书已就绪。"
@@ -340,176 +345,6 @@ copy_project_dir_overwrite() {
     fi
 }
 
-ssetup_domain_https() {
-    echo -e "${C_CYAN}========== 域名与 HTTPS 设置 ==========${C_RESET}"
-    
-    # 安全处理未定义变量（set -u 环境下）
-    local DOMAIN=""
-    local PUBLIC_PORT=""
-    local INTERNAL_PORT=""
-    
-    # ---------- 1. 读取当前配置（直接从 web_portal.json）----------
-    local cfg_file="$DCF_DIR/web_portal.json"
-    if [[ -f "$cfg_file" ]]; then
-        # 使用 python 解析 JSON，避免依赖 jq
-        DOMAIN=$($VENV_DIR/bin/python -c "import json; print(json.load(open('$cfg_file')).get('domain', ''))" 2>/dev/null || echo "")
-        PUBLIC_PORT=$($VENV_DIR/bin/python -c "import json; print(json.load(open('$cfg_file')).get('public_port', ''))" 2>/dev/null || echo "")
-        INTERNAL_PORT=$($VENV_DIR/bin/python -c "import json; print(json.load(open('$cfg_file')).get('internal_port', ''))" 2>/dev/null || echo "")
-    fi
-    
-    # 如果读取失败，使用默认值或提示输入
-    if [[ -z "$DOMAIN" ]]; then
-        read -p "请输入域名（例如 xiany.de）: " DOMAIN
-    else
-        read -p "当前域名: $DOMAIN，确认请直接回车，修改请输入新域名: " new_domain
-        [[ -n "$new_domain" ]] && DOMAIN="$new_domain"
-    fi
-    
-    if [[ -z "$PUBLIC_PORT" ]]; then
-        read -p "请输入对外公开端口（默认 819）: " PUBLIC_PORT
-        PUBLIC_PORT=${PUBLIC_PORT:-819}
-    else
-        read -p "当前公开端口: $PUBLIC_PORT，确认直接回车，修改请输入新端口: " new_port
-        [[ -n "$new_port" ]] && PUBLIC_PORT="$new_port"
-    fi
-    
-    if [[ -z "$INTERNAL_PORT" ]]; then
-        INTERNAL_PORT=1819
-    fi
-    
-    echo -e "${C_GREEN}将配置域名: $DOMAIN，HTTPS 端口: $PUBLIC_PORT，后端端口: $INTERNAL_PORT${C_RESET}"
-    
-    # ---------- 2. 检查并安装 certbot ----------
-    if ! command -v certbot &>/dev/null; then
-        echo -e "${C_YELLOW}正在安装 Certbot...${C_RESET}"
-        apt update && apt install -y certbot python3-certbot-nginx
-        if [[ $? -ne 0 ]]; then
-            echo -e "${C_RED}Certbot 安装失败，请手动安装后重试。${C_RESET}"
-            return 1
-        fi
-    fi
-    
-    # ---------- 3. 确保 80 端口可以访问本域名（临时配置） ----------
-    local temp_nginx_conf="/etc/nginx/sites-available/temp_${DOMAIN}"
-    local temp_enabled="/etc/nginx/sites-enabled/temp_${DOMAIN}"
-    local need_cleanup=0
-    
-    if ! nginx -T 2>/dev/null | grep -q "server_name.*$DOMAIN"; then
-        echo -e "${C_YELLOW}当前 Nginx 未配置域名 $DOMAIN 的 HTTP 访问，将临时添加配置用于证书验证...${C_RESET}"
-        cat > "$temp_nginx_conf" <<EOF
-server {
-    listen 80;
-    server_name $DOMAIN;
-    root /var/www/html;
-    location /.well-known/acme-challenge/ {
-        root /var/www/html;
-    }
-}
-EOF
-        ln -sf "$temp_nginx_conf" "$temp_enabled"
-        nginx -t && systemctl reload nginx
-        need_cleanup=1
-    fi
-    
-    # ---------- 4. 申请 SSL 证书 ----------
-    echo -e "${C_GREEN}正在申请 SSL 证书...${C_RESET}"
-    mkdir -p /var/www/html/.well-known/acme-challenge
-    certbot certonly --webroot -w /var/www/html -d "$DOMAIN" \
-        --non-interactive --agree-tos --register-unsafely-without-email \
-        --keep-until-expiring
-    if [[ $? -ne 0 ]]; then
-        echo -e "${C_RED}证书申请失败，请检查域名解析是否正确（需指向本服务器 IP）以及 80 端口是否可访问。${C_RESET}"
-        [[ $need_cleanup -eq 1 ]] && rm -f "$temp_enabled" "$temp_nginx_conf" && systemctl reload nginx
-        return 1
-    fi
-    
-    # 清理临时配置
-    if [[ $need_cleanup -eq 1 ]]; then
-        rm -f "$temp_enabled" "$temp_nginx_conf"
-        systemctl reload nginx
-    fi
-    
-    # 证书路径
-    local cert_path="/etc/letsencrypt/live/$DOMAIN/fullchain.pem"
-    local key_path="/etc/letsencrypt/live/$DOMAIN/privkey.pem"
-    if [[ ! -f "$cert_path" ]]; then
-        echo -e "${C_RED}证书文件未找到，配置中止。${C_RESET}"
-        return 1
-    fi
-    
-    # ---------- 5. 配置 Nginx 支持 HTTPS ----------
-    local nginx_conf="/etc/nginx/sites-available/quant-${DOMAIN}-ssl"
-    local nginx_enabled="/etc/nginx/sites-enabled/quant-${DOMAIN}-ssl"
-    
-    cat > "$nginx_conf" <<EOF
-# HTTPS server block for $DOMAIN (port $PUBLIC_PORT)
-server {
-    listen $PUBLIC_PORT ssl;
-    server_name $DOMAIN;
-
-    ssl_certificate $cert_path;
-    ssl_certificate_key $key_path;
-    include /etc/letsencrypt/options-ssl-nginx.conf;
-    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
-
-    location / {
-        proxy_pass http://127.0.0.1:$INTERNAL_PORT;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-}
-
-# (可选) 将原有的 HTTP 访问强制跳转到 HTTPS
-server {
-    listen 80;
-    server_name $DOMAIN;
-    return 301 https://\$server_name:$PUBLIC_PORT\$request_uri;
-}
-EOF
-
-    # 如果用户希望使用标准 443 端口，可以额外添加一个监听 443 的 server 块
-    if [[ "$PUBLIC_PORT" != "443" ]]; then
-        echo -e "${C_YELLOW}提示：您设置的 HTTPS 端口是 $PUBLIC_PORT，访问请使用 https://$DOMAIN:$PUBLIC_PORT${C_RESET}"
-        read -p "是否同时配置标准 443 端口（需要 443 未占用）？(y/N): " add_443
-        if [[ "$add_443" =~ ^[Yy]$ ]]; then
-            cat >> "$nginx_conf" <<EOF
-
-# Standard 443 port fallback
-server {
-    listen 443 ssl;
-    server_name $DOMAIN;
-    ssl_certificate $cert_path;
-    ssl_certificate_key $key_path;
-    include /etc/letsencrypt/options-ssl-nginx.conf;
-    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
-    location / {
-        proxy_pass http://127.0.0.1:$INTERNAL_PORT;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-}
-EOF
-        fi
-    fi
-    
-    # 启用配置并测试
-    ln -sf "$nginx_conf" "$nginx_enabled"
-    nginx -t
-    if [[ $? -ne 0 ]]; then
-        echo -e "${C_RED}Nginx 配置文件语法错误，已取消启用。请手动检查 $nginx_conf${C_RESET}"
-        rm -f "$nginx_enabled"
-        return 1
-    fi
-    
-    systemctl reload nginx
-    echo -e "${C_GREEN}✅ HTTPS 配置成功！${C_RESET}"
-    echo -e "访问地址：${C_BOLD}https://$DOMAIN:$PUBLIC_PORT${C_RESET}"
-    echo -e "证书自动续期任务已由 Certbot 定时服务管理（检查：systemctl status certbot.timer）"
-}
 
 update_project_files() {
     ensure_quant_dir
@@ -632,10 +467,15 @@ update_rely() {
         return 1
     fi
 
-    if ! ${SUDO} apt-get install -y \
-        python3 python3-venv python3-pip \
-        ca-certificates curl wget tar nginx openssl cron \
-        build-essential; then
+    local sys_pkgs="python3 python3-venv python3-pip ca-certificates curl wget tar openssl cron build-essential"
+    if ! command -v nginx >/dev/null 2>&1; then
+        echo "检测到 nginx 未安装，将一并安装。"
+        sys_pkgs="$sys_pkgs nginx"
+    else
+        echo "nginx 已存在，跳过安装。"
+    fi
+
+    if ! ${SUDO} apt-get install -y $sys_pkgs; then
         echo "❌ apt-get install 失败。"
         return 1
     fi
@@ -767,7 +607,10 @@ PY
     deactivate || true
 
     echo
-    prompt_read _web_ans "是否现在配置 Web 管理端（nginx 819 + 登录页）？(y/n): " "n"
+    echo -e "${C_CYAN}========== 项目文件检查 ==========${C_RESET}"
+    self_check_project_files
+
+    prompt_read _web_ans "是否现在配置 Web 管理端（nginx 2096 + 登录页）？(y/n): " "n"
     if [[ "${_web_ans:-n}" =~ ^[yY]$ ]]; then
         configure_web_portal
     fi
@@ -889,16 +732,37 @@ stop_quant() {
 # ============================================
 show_status() {
     ensure_quant_dir
+    echo -e "${C_CYAN}========== 服务运行状态 ==========${C_RESET}"
+
+    # quant.py 状态
     if [ -f "$PID_FILE" ]; then
         PID=$(cat "$PID_FILE" 2>/dev/null || echo "")
         if [ -n "${PID}" ] && ps -p "$PID" > /dev/null 2>&1; then
-            echo "quant.py 正在运行（PID=$PID）。"
+            echo -e "Quant.py:      ${C_GREEN}✅ active (running)${C_RESET} (PID=$PID)"
         else
-            echo "PID 文件存在，但进程未运行。"
+            echo -e "Quant.py:      ${C_RED}❌ inactive${C_RESET}"
         fi
     else
-        echo "quant.py 当前未在运行。"
+        echo -e "Quant.py:      ${C_RED}❌ inactive${C_RESET}"
     fi
+
+    # Web 服务状态
+    if ${SUDO} systemctl is-active --quiet quant-web 2>/dev/null; then
+        WEB_PID=$(${SUDO} systemctl show quant-web -p MainPID --value 2>/dev/null)
+        echo -e "Web 管理端:     ${C_GREEN}✅ active (running)${C_RESET} (PID=$WEB_PID)"
+    else
+        echo -e "Web 管理端:     ${C_RED}❌ inactive${C_RESET}"
+        echo -e "${C_YELLOW}  提示: 执行菜单 2 重启系统${C_RESET}"
+    fi
+
+    # Nginx 状态
+    if ${SUDO} systemctl is-active --quiet nginx 2>/dev/null; then
+        echo -e "Nginx:         ${C_GREEN}✅ active (running)${C_RESET}"
+    else
+        echo -e "Nginx:         ${C_RED}❌ inactive${C_RESET}"
+    fi
+
+    echo -e "${C_CYAN}==============================${C_RESET}"
     echo "当前cron任务："
     crontab -l 2>/dev/null | grep "quant.sh --cron-check" || echo "无相关cron任务。"
 }
@@ -1077,6 +941,14 @@ EOF
 
     ${SUDO} ln -sf "$WEB_NGINX_SITE" "$WEB_NGINX_LINK"
     ${SUDO} nginx -t || return 1
+
+    # 放行防火墙端口
+    if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi active; then
+        ufw allow "$WEB_PUBLIC_PORT/tcp" >/dev/null 2>&1 || true
+        ufw reload >/dev/null 2>&1 || true
+        echo "✅ UFW 已放行端口 $WEB_PUBLIC_PORT"
+    fi
+
     ${SUDO} systemctl daemon-reload
     ${SUDO} systemctl enable quant-web >/dev/null 2>&1 || true
     ${SUDO} systemctl restart quant-web
@@ -1162,6 +1034,81 @@ web_portal_status() {
     ${SUDO} nginx -t 2>/dev/null || true
 }
 
+restart_all_services() {
+    echo -e "${C_CYAN}========== 系统重启（Quant + Web） ==========${C_RESET}"
+
+    # 检查必要文件
+    if [ ! -f "$PY_SCRIPT" ]; then
+        echo -e "${C_RED}❌ 未找到 $PY_SCRIPT，请先执行菜单 1 下载/更新项目${C_RESET}"
+        return 1
+    fi
+
+    # 停止服务
+    echo "正在停止服务..."
+    ${SUDO} systemctl stop quant-web 2>/dev/null || true
+    sleep 1
+    if ps aux | grep -v grep | grep "$PY_SCRIPT" >/dev/null 2>&1; then
+        pkill -f "$PY_SCRIPT" || true
+        sleep 1
+    fi
+
+    # 启动 quant.py
+    echo "正在启动 quant.py..."
+    if $PYTHON_CMD "$PY_SCRIPT" > "$LOG_FILE" 2>&1 &
+    then
+        echo $! > "$PID_FILE"
+        NEW_PID=$!
+        sleep 2
+        if ps -p "$NEW_PID" >/dev/null 2>&1; then
+            echo -e "${C_GREEN}✅ quant.py 已启动，PID=$NEW_PID${C_RESET}"
+        else
+            echo -e "${C_RED}❌ quant.py 启动失败${C_RESET}"
+            tail -n 5 "$LOG_FILE" 2>/dev/null | sed "s/^/${C_RED}  /"
+            echo -e "${C_RESET}"
+            return 1
+        fi
+    else
+        echo -e "${C_RED}❌ quant.py 启动失败${C_RESET}"
+        return 1
+    fi
+
+    # 启动 quant-web
+    echo "正在启动 Web 管理端..."
+    if ${SUDO} systemctl restart quant-web 2>&1; then
+        sleep 2
+        if ${SUDO} systemctl is-active --quiet quant-web; then
+            echo -e "${C_GREEN}✅ Web 管理端已启动${C_RESET}"
+        else
+            echo -e "${C_RED}❌ Web 服务启动失败${C_RESET}"
+            ${SUDO} journalctl -u quant-web -n 3 --no-pager 2>/dev/null | sed "s/^/${C_RED}  /"
+            echo -e "${C_RESET}"
+        fi
+    else
+        echo -e "${C_RED}❌ Web 服务启动失败${C_RESET}"
+        return 1
+    fi
+
+    # 输出状态
+    echo ""
+    echo -e "${C_CYAN}========== 系统状态 ==========${C_RESET}"
+
+    # quant.py 状态
+    if ps -p "$(cat "$PID_FILE" 2>/dev/null)" >/dev/null 2>&1; then
+        echo -e "Quant.py:      ${C_GREEN}✅ active (running)${C_RESET}"
+    else
+        echo -e "Quant.py:      ${C_RED}❌ inactive${C_RESET}"
+    fi
+
+    # Web 状态
+    if ${SUDO} systemctl is-active --quiet quant-web 2>/dev/null; then
+        echo -e "Web 管理端:     ${C_GREEN}✅ active (running)${C_RESET}"
+    else
+        echo -e "Web 管理端:     ${C_RED}❌ inactive${C_RESET}"
+    fi
+
+    echo -e "${C_CYAN}==============================${C_RESET}"
+}
+
 uninstall_quant() {
     echo -e "${C_RED}========== 卸载 Quant 程序 ==========${C_RESET}"
     echo -e "${C_YELLOW}警告：此操作将删除以下内容：${C_RESET}"
@@ -1187,9 +1134,28 @@ uninstall_quant() {
     ${SUDO} systemctl daemon-reload 2>/dev/null || true
 
     echo "正在删除 nginx 配置..."
-    ${SUDO} rm -f /etc/nginx/sites-available/quant-web-*.conf
-    ${SUDO} rm -f /etc/nginx/sites-enabled/quant-web-*.conf
+    # 删除 nginx 配置（仅限 quant 自身的，不误删其他站点）
+    for f in /etc/nginx/sites-available/quant-web-*.conf; do
+        [ -f "$f" ] && ${SUDO} rm -f "$f"
+    done
+    for f in /etc/nginx/sites-enabled/quant-web-*.conf; do
+        [ -f "$f" ] && ${SUDO} rm -f "$f"
+    done
+    for f in /etc/nginx/sites-available/quant-*-ssl; do
+        [ -f "$f" ] && ${SUDO} rm -f "$f"
+    done
+    for f in /etc/nginx/sites-enabled/quant-*-ssl; do
+        [ -f "$f" ] && ${SUDO} rm -f "$f"
+    done
     ${SUDO} nginx -t >/dev/null 2>&1 && ${SUDO} systemctl reload nginx 2>/dev/null || true
+
+    # 移除本程序对应的 ufw 规则（仅删除 quant 自身的端口，不影响其他规则）
+    local ufw_port
+    ufw_port=$(grep -oP '"public_port"\s*:\s*\K[0-9]+' "$WEB_CONF_FILE" 2>/dev/null || echo "2096")
+    if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi active; then
+        ufw delete allow "${ufw_port}/tcp" >/dev/null 2>&1 || true
+        ufw reload >/dev/null 2>&1 || true
+    fi
 
     echo "正在删除 crontab 任务..."
     crontab -l 2>/dev/null | grep -v "quant.sh --cron-check" | crontab - 2>/dev/null || true
@@ -1212,15 +1178,12 @@ show_menu() {
     echo -e "${C_DIM} （运行文件目录：$DCF_DIR）${C_RESET}"
     echo -e "${C_CYAN}===============================${C_RESET}"
     echo -e "${C_YELLOW}1)${C_RESET} 下载/更新项目与依赖"
-    echo -e "${C_GREEN}2)${C_RESET} 启动脚本"
+    echo -e "${C_RED}2)${C_RESET} 系统重启（quant.py + Web）"
     echo -e "${C_RED}3)${C_RESET} 停止脚本"
     echo -e "${C_CYAN}4)${C_RESET} 查看运行状态"
     echo -e "${C_YELLOW}5)${C_RESET} 配置/安装网页端"
-    echo -e "${C_YELLOW}6)${C_RESET} 重启网页端"
-    echo -e "${C_CYAN}7)${C_RESET} 查看网页端状态"
-    echo -e "${C_CYAN}8)${C_RESET} 检查项目文件"
-    echo -e "${C_GREEN}9)${C_RESET} 域名设置（配置 HTTPS）"
-    echo -e "${C_RED}10)${C_RESET} 卸载程序"
+    echo -e "${C_GREEN}6)${C_RESET} 域名设置（配置 HTTPS）"
+    echo -e "${C_RED}7)${C_RESET} 卸载程序"
     echo -e "${C_RED}0)${C_RESET} 退出"
     echo -e "${C_CYAN}===============================${C_RESET}"
 }
@@ -1232,15 +1195,12 @@ while true; do
     read -r choice
 case "$choice" in
     1) update_rely ;;
-    2) start_quant ;;
+    2) restart_all_services ;;
     3) stop_quant ;;
     4) show_status ;;
     5) configure_web_portal ;;
-    6) restart_web_portal ;;
-    7) web_portal_status ;;
-    8) self_check_project_files ;;
-    9) setup_domain_https ;;
-    10) uninstall_quant ;;
+    6) setup_domain_https ;;
+    7) uninstall_quant ;;
     0) exit 0 ;;
     *) echo "无效选项，请重新输入。" ;;
 esac
@@ -1310,7 +1270,7 @@ server {
         root /var/www/html;
     }
 }
-NGINX_TEMP
+EOF_TEMP
         ln -sf "$temp_nginx_conf" "$temp_enabled"
         nginx -t && systemctl reload nginx
         need_cleanup=1
@@ -1372,7 +1332,7 @@ server {
     server_name $DOMAIN;
     return 301 https://\$server_name:$PUBLIC_PORT\$request_uri;
 }
-NGINX_SSL
+EOF_SSL
 
     if [[ "$PUBLIC_PORT" != "443" ]]; then
         echo -e "${C_YELLOW}提示：您设置的 HTTPS 端口是 $PUBLIC_PORT，访问请使用 https://$DOMAIN:$PUBLIC_PORT${C_RESET}"
@@ -1395,10 +1355,10 @@ server {
         proxy_set_header X-Forwarded-Proto \$scheme;
     }
 }
-NGINX_443
+EOF_443
         fi
     fi
-    
+
     ln -sf "$nginx_conf" "$nginx_enabled"
     nginx -t
     if [[ $? -ne 0 ]]; then
