@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>{{ app_name }}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='portal.css') }}">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
   <script>
     (function(){
       try{
@@ -32,7 +33,7 @@
       margin:18px auto 20px;
       padding:10px;
       display:grid;
-      grid-template-columns:repeat(5,minmax(0,1fr));
+      grid-template-columns:repeat(3,minmax(0,1fr));
       justify-content:center;
       align-items:center;
       gap:10px;
@@ -82,9 +83,12 @@
     .snapshot-table th{color:rgba(235,245,255,.62);font-weight:600;}
     .snapshot-empty{color:rgba(235,245,255,.58);font-size:14px;margin:10px 0 0;}
 .snapshot-reason-card{margin-top:12px;border:1px solid rgba(255,255,255,.12);border-radius:16px;background:rgba(255,255,255,.055);padding:14px 16px;line-height:1.75;font-size:15px;color:rgba(255,255,255,.92);white-space:normal;word-break:break-word;overflow-wrap:anywhere;}
-.status-control-row{display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin:0 0 16px;}
-.status-control-row .field-block{min-width:260px;flex:1 1 320px;}
-.status-control-row form{display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin:0;}
+.status-control-row{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin:0 0 16px;}
+.status-control-row .field-block{min-width:0;flex:1 1 auto;}
+.status-control-row form{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin:0;}
+.status-control-row > form:first-child{flex:0 0 35%;display:flex;align-items:flex-end;gap:10px;flex-wrap:nowrap;}
+.status-control-row > form:first-child .field-block{flex:1 1 auto;min-width:0;}
+.status-control-row .action-btn{min-width:64px;padding-left:14px;padding-right:14px;}
 .reference-price-grid,.source-metric-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:14px;}
 .reference-price-card,.source-metric-card{border:1px solid rgba(255,255,255,.12);border-radius:14px;background:rgba(255,255,255,.055);padding:11px 12px;}
 .reference-price-card.primary{border-color:rgba(90,200,255,.42);background:rgba(90,200,255,.10);}
@@ -114,7 +118,7 @@
         padding:8px;
         gap:6px;
         border-radius:18px;
-        grid-template-columns:repeat(5,minmax(0,1fr));
+        grid-template-columns:repeat(3,minmax(0,1fr));
       }
       .page-nav-link{
         min-height:38px;
@@ -586,7 +590,7 @@
     body:not(.theme-x3-dark) .panel-toggle-slider{background:#e5e7eb;border-color:rgba(15,23,42,.12);box-shadow:inset 0 1px 3px rgba(15,23,42,.12);}
     @media (max-width:860px){.push-field-row{grid-template-columns:1fr;gap:8px;}.push-field-telegram_chat_id input,.push-field-ntfy_topic input,.push-field-ntfy_username input,.push-field-ntfy_password input,.push-field-ntfy_priority input{max-width:100%;}}
     @media (max-width:640px){
-      .page-nav{grid-template-columns:repeat(5,minmax(0,1fr)) !important;gap:5px !important;padding:6px !important;}
+      .page-nav{grid-template-columns:repeat(3,minmax(0,1fr)) !important;gap:5px !important;padding:6px !important;}
       .page-nav-link{font-size:13px !important;min-height:36px !important;padding:7px 2px !important;border-radius:12px !important;}
       .push-action-row .action-btn,.push-test-inline{flex:1 1 auto;}
       .push-test-inline .action-btn{width:100%;}
@@ -791,9 +795,12 @@
       .status-action-row{width:auto;display:flex !important;grid-template-columns:none !important;gap:8px;align-items:center;justify-content:flex-end;}
       .status-action-row form,.status-action-row .action-btn{width:auto;}
       .status-action-row .action-btn{min-height:40px;min-width:70px;padding:9px 14px;border-radius:12px;font-size:14px;line-height:20px;}
-      .status-control-row form{width:100%;display:grid !important;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end;}
-      .status-control-row .field-block{min-width:0;}
-      .status-control-row .action-btn{min-width:70px;padding-left:12px;padding-right:12px;}
+      .status-control-row{flex-wrap:nowrap !important;gap:10px;align-items:flex-end !important;}
+      .status-control-row > form:first-child{width:auto !important;display:flex !important;flex:0 0 auto !important;align-items:flex-end !important;gap:10px;flex-wrap:nowrap !important;}
+      .status-control-row > form:first-child .field-block{flex:0 0 100%;min-width:160px;width:auto;}
+      .status-control-row > form:first-child select{width:100%;}
+      .status-control-row > form:first-child .danger-btn{flex:0 0 auto;margin-left:0;}
+      .status-control-row .action-btn{min-height:40px;min-width:70px;padding:9px 14px;border-radius:12px;font-size:14px;line-height:20px;}
       .section-header.between{align-items:center;gap:10px;flex-direction:row;}
       .snapshot-toolbar{width:100%;align-items:stretch;}
       .snapshot-date-form{flex:1 1 100%;display:grid;grid-template-columns:auto minmax(0,1fr);}
@@ -1338,67 +1345,24 @@ body:not(.theme-x3-dark) .panel-toggle input:checked + .panel-toggle-slider{back
       {% endif %}
     {% endwith %}
 
-    {% if page_name == 'symbols' %}
-      <section class="card page-card symbols-current-card">
-        <div class="section-header">
-          <div>
-            <h2>当前标的</h2>
-          </div>
-        </div>
-        <form method="post" class="symbol-switcher-row" id="symbol-switcher-form">
-          <input type="hidden" name="action" id="symbol-form-action" value="set_symbol">
-          <div class="field-block grow symbol-select-field">
-            <label for="symbol-key-select">选择标的</label>
-            <select name="symbol_key" id="symbol-key-select" class="selected-symbol-select" data-selected="{{ selected }}" onchange="submitSymbolSelection(this)">
-              {% for card in symbol_cards %}
-              <option value="{{ card.key }}" {% if card.active %}selected{% endif %}>{{ card.label }}{% if card.symbol %} ({{ card.symbol }}){% endif %}</option>
-              {% endfor %}
-            </select>
-          </div>
-          {% if selected != 'COMMON_BACKTEST_CONFIG' %}
-            <button type="button" class="danger-btn action-btn" onclick="openSymbolDeleteDialog('{{ selected_label|e }}','{{ selected_symbol_code|e }}')">删除</button>
-          {% else %}
-            <button type="button" class="disabled-btn action-btn" disabled>删除</button>
-          {% endif %}
-        </form>
-      </section>
-
-      <section class="card page-card">
-        <div class="section-header"><h2>新增标的</h2></div>
-        <form method="post" class="symbol-editor-form">
-          <input type="hidden" name="action" value="add_symbol">
-          <div class="symbol-editor-grid">
-            <div class="field-block">
-              <label>标的名称</label>
-              <input type="text" name="new_name" placeholder="如 福耀 / 腾讯 / 陕能">
-            </div>
-            <div class="field-block">
-              <label>股票代码</label>
-              <input type="text" name="new_symbol" placeholder="如SH600660/HK00700/SZ159696">
-            </div>
-          </div>
-          <div class="symbol-action-row one-btn-row">
-            <button type="submit" class="primary-btn action-btn">新增</button>
-          </div>
-        </form>
-      </section>
-    {% endif %}
-
     {% if page_name == 'status' %}
       <section class="card page-card">
         <div class="section-header between">
-          <h2>状态</h2>
+          <h2>标的</h2>
           <div class="status-action-row">
             <form method="post" action="{{ url_for('clear_market_state_page') }}" onsubmit="return confirm('确认重置当前标的运行状态？last_price、last_trade_price、last_add_price、步进步数等会恢复初始，仅影响当前标的。');">
               <input type="hidden" name="symbol_key" value="{{ selected }}">
               <button type="submit" class="secondary-btn action-btn">重置</button>
             </form>
+            {% if selected != 'COMMON_BACKTEST_CONFIG' %}
+              <button type="button" class="danger-btn action-btn" onclick="openSymbolDeleteDialog('{{ selected_label|e }}','{{ selected_symbol_code|e }}')">删除</button>
+            {% endif %}
           </div>
         </div>
         <div class="status-control-row">
           <form method="get" action="{{ url_for('status_page') }}">
             <div class="field-block">
-              <label for="status-symbol-select">选择标的状态</label>
+              <label for="status-symbol-select">选择标的</label>
               <select id="status-symbol-select" name="symbol_key" onchange="this.form.submit()">
                 {% for card in symbol_cards %}
                   {% if card.key != 'COMMON_BACKTEST_CONFIG' %}
@@ -1407,6 +1371,10 @@ body:not(.theme-x3-dark) .panel-toggle input:checked + .panel-toggle-slider{back
                 {% endfor %}
               </select>
             </div>
+          </form>
+          <form method="post" action="{{ url_for('symbols_page') }}" id="symbol-switcher-form" class="hidden">
+            <input type="hidden" name="action" id="symbol-form-action" value="delete_symbol">
+            <input type="hidden" name="symbol_key" value="{{ selected }}">
           </form>
         </div>
         <div class="status-box"><pre>{{ status_text }}</pre></div>
@@ -1608,14 +1576,25 @@ body:not(.theme-x3-dark) .panel-toggle input:checked + .panel-toggle-slider{back
         {% endif %}
         </div>
       </section>
-    {% endif %}
 
-    {% if page_name == 'params' %}
       <section class="card page-card">
+        <div class="section-header between">
+          <div>
+            <h2>参数设置{% if selected_label %} - {{ selected_label }}{% endif %}</h2>
+            <p class="section-note">修改后点击保存将写入 quant.yaml 并通知后台重载。</p>
+          </div>
+          <label class="panel-toggle" title="显示或隐藏参数设置">
+            <span class="panel-toggle-text">显示参数</span>
+            <input type="checkbox" id="params-toggle" aria-label="显示或隐藏参数设置">
+            <span class="panel-toggle-slider"></span>
+          </label>
+        </div>
+        <div id="params-panel" class="hidden">
         <form method="post" action="{{ url_for('params_page') }}" id="params-form" class="params-form">
           <input type="hidden" name="action" value="save_params">
+          <input type="hidden" name="return_to" value="status">
           <div class="section-header between">
-            <h2>参数{% if selected_label %} - {{ selected_label }}{% endif %}</h2>
+            <div></div>
             <button type="button" id="params-edit-btn" class="primary-btn action-btn" data-mode="edit" onclick="toggleParamsEdit(this)">修改</button>
           </div>
           <section class="page-card-group compact-group">
@@ -1652,6 +1631,7 @@ body:not(.theme-x3-dark) .panel-toggle input:checked + .panel-toggle-slider{back
             {% endfor %}
           </section>
         </form>
+        </div>
       </section>
     {% endif %}
 
@@ -1718,6 +1698,17 @@ body:not(.theme-x3-dark) .panel-toggle input:checked + .panel-toggle-slider{back
           </div>
         {% endif %}
 
+        <!-- 回测图表可视化 -->
+        {% if chart_symbol %}
+          <div class="section-header subhead">
+            <h3>回测图表 - K线 + MA150 + 交易信号</h3>
+          </div>
+          <div style="margin-top:12px;border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:12px;background:rgba(255,255,255,.03);" data-chart-symbol="{{ chart_symbol }}">
+            <canvas id="backtest-chart-canvas" style="width:100%;height:500px;display:block;"></canvas>
+            <div id="chart-loading" style="text-align:center;color:rgba(235,245,255,.58);font-size:13px;margin-top:10px;">加载图表数据中...</div>
+          </div>
+        {% endif %}
+
         <div class="section-header subhead raw-head">
           <h3>原始输出</h3>
           <button type="button" class="help-btn large" aria-label="说明" onclick="toggleBacktestHelp()">?</button>
@@ -1731,6 +1722,26 @@ body:not(.theme-x3-dark) .panel-toggle input:checked + .panel-toggle-slider{back
     {% endif %}
 
     {% if page_name == 'push' %}
+      <section class="card page-card">
+        <div class="section-header"><h2>新增标的</h2></div>
+        <form method="post" action="{{ url_for('symbols_page') }}" class="symbol-editor-form">
+          <input type="hidden" name="action" value="add_symbol">
+          <div class="symbol-editor-grid">
+            <div class="field-block">
+              <label>标的名称</label>
+              <input type="text" name="new_name" placeholder="如 福耀 / 腾讯 / 陕能">
+            </div>
+            <div class="field-block">
+              <label>股票代码</label>
+              <input type="text" name="new_symbol" placeholder="如SH600660/HK00700/SZ159696">
+            </div>
+          </div>
+          <div class="symbol-action-row one-btn-row">
+            <button type="submit" class="primary-btn action-btn">新增</button>
+          </div>
+        </form>
+      </section>
+
       <section class="card page-card">
         <div class="section-header between">
           <div>
@@ -1799,11 +1810,14 @@ body:not(.theme-x3-dark) .panel-toggle input:checked + .panel-toggle-slider{back
             </div>
             <div class="push-field-row">
               <div>
-                <label for="XUEQIU_TOKEN">雪球 API Token / Cookie</label>
-                <div class="push-field-help">选择雪球源时使用。可填写 xq_a_token，也可粘贴完整 Cookie</div>
+                <label for="XUEQIU_TOKEN">雪球 API Token</label>
+                <div class="push-field-help">仅显示 xq_a_token，可通过浏览器插件推送或手动填写</div>
               </div>
               <div>
-                <input id="XUEQIU_TOKEN" name="XUEQIU_TOKEN" type="text" autocomplete="off" readonly data-system-lock="1" value="{{ system_config.get('XUEQIU_TOKEN', '') }}">
+                <input id="XUEQIU_TOKEN" name="XUEQIU_TOKEN" type="text" autocomplete="off" readonly data-system-lock="1" value="{{ system_config_masked_token or '未设置' }}">
+                {% if system_config_token_updated_at %}
+                <div class="push-field-note">更新时间：{{ system_config_token_updated_at }}</div>
+                {% endif %}
               </div>
             </div>
           </div>
@@ -2156,7 +2170,209 @@ document.addEventListener('DOMContentLoaded', function(){
   bindPanelToggle('trade-snapshot-toggle', 'trade-snapshot-panel', 'quant_status_trade_snapshot_panel_' + (document.body.dataset.selected || 'default'));
   bindPanelToggle('rollback-toggle', 'rollback-panel', 'quant_status_rollback_panel_' + (document.body.dataset.selected || 'default'));
   bindPanelToggle('source-stats-toggle', 'source-stats-panel', 'quant_status_source_stats_panel_' + (document.body.dataset.selected || 'default'));
+  bindPanelToggle('params-toggle', 'params-panel', 'quant_status_params_panel_' + (document.body.dataset.selected || 'default'));
+
+  initBacktestChart();
 });
+
+function initBacktestChart(){
+  const canvas = document.getElementById('backtest-chart-canvas');
+  const loading = document.getElementById('chart-loading');
+  const symbolEl = document.querySelector('[data-chart-symbol]');
+
+  if(!canvas || !symbolEl){
+    console.log('Canvas or symbol element not found');
+    return;
+  }
+
+  const symbol = symbolEl.getAttribute('data-chart-symbol');
+  console.log('Loading chart for symbol:', symbol);
+  if(!symbol){
+    if(loading) loading.textContent = 'No symbol provided';
+    return;
+  }
+
+  const url = `/api/backtest-chart/${encodeURIComponent(symbol)}`;
+  console.log('Fetching from:', url);
+
+  fetch(url)
+    .then(resp => {
+      console.log('Response status:', resp.status);
+      if(resp.status === 404){ throw new Error('No backtest data found'); }
+      if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      return resp.json();
+    })
+    .then(data => {
+      console.log('Chart data received:', data);
+      if(data.error){
+        if(loading) loading.textContent = 'Error: ' + data.error;
+        return;
+      }
+      if(loading){ loading.style.display = 'none'; }
+      if(data.data && data.data.length > 0){
+        renderBacktestChart(canvas, data);
+      }else{
+        if(loading) loading.textContent = 'No data to display';
+      }
+    })
+    .catch(err => {
+      console.error('Chart load error:', err);
+      if(loading){ loading.textContent = 'Error: ' + err.message; }
+    });
+}
+
+function renderBacktestChart(canvas, data){
+  if(!canvas || !data || !data.data){ return; }
+
+  const dailyData = data.data || [];
+  if(dailyData.length === 0){ return; }
+
+  const labels = dailyData.map(d => d.date);
+  const prices = dailyData.map(d => d.price);
+  const ma150Values = dailyData.map(d => d.ma150 || null);
+  const trendUpperValues = dailyData.map(d => d.trend_upper || null);
+  const zones = dailyData.map(d => d.zone);
+
+  let trendMultiple = "N/A";
+  for(let i = 0; i < dailyData.length; i++){
+    if(dailyData[i].ma150 && dailyData[i].trend_upper && dailyData[i].zone){
+      const ratio = (dailyData[i].trend_upper / dailyData[i].ma150).toFixed(2);
+      trendMultiple = ratio + "x";
+      break;
+    }
+  }
+
+  const trades = data.trades || [];
+  const buyIndices = [];
+  const sellIndices = [];
+
+  for(let i = 0; i < trades.length; i++){
+    const trade = trades[i];
+    const idx = labels.indexOf(trade.date);
+    if(idx >= 0){
+      if(trade.action === 'BUY'){
+        buyIndices.push({ idx: idx, price: trade.price });
+      }else if(trade.action === 'SELL'){
+        sellIndices.push({ idx: idx, price: trade.price });
+      }
+    }
+  }
+
+  const buyData = new Array(labels.length).fill(null);
+  buyIndices.forEach(b => { buyData[b.idx] = b.price; });
+
+  const sellData = new Array(labels.length).fill(null);
+  sellIndices.forEach(s => { sellData[s.idx] = s.price; });
+
+  const ctx = canvas.getContext('2d');
+
+  const backgroundPlugin = {
+    id: 'zoneBackground',
+    beforeDatasetsDraw(chart) {
+      const ctx = chart.ctx;
+      const xaxis = chart.scales.x;
+      const yaxis = chart.scales.y;
+
+      zones.forEach((zone, i) => {
+        if(!zone || !xaxis || !yaxis) return;
+
+        let bgColor = null;
+        if(zone.includes('BOX')) bgColor = 'rgba(100, 200, 255, 0.10)';
+        else if(zone.includes('TREND')) bgColor = 'rgba(255, 150, 100, 0.03)';
+        else if(zone.includes('CHANCE')) bgColor = 'rgba(200, 220, 100, 0.10)';
+        else if(zone.includes('CLEAR')) bgColor = 'rgba(200, 100, 150, 0.10)';
+
+        if(bgColor && i < labels.length - 1){
+          const x0 = xaxis.getPixelForValue(i);
+          const x1 = xaxis.getPixelForValue(i + 1);
+          const y0 = yaxis.top;
+          const y1 = yaxis.bottom;
+
+          ctx.fillStyle = bgColor;
+          ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+        }
+      });
+    }
+  };
+
+  new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [
+        {
+          label: 'K线价格',
+          data: prices,
+          borderColor: 'rgba(100, 150, 255, 0.9)',
+          backgroundColor: 'rgba(100, 150, 255, 0.05)',
+          borderWidth: 2.5,
+          fill: false,
+          tension: 0.3,
+          pointRadius: 1,
+          pointHoverRadius: 4,
+        },
+        {
+          label: '买入',
+          data: buyData,
+          backgroundColor: 'rgba(0, 200, 100, 1)',
+          borderColor: 'rgba(0, 200, 100, 1)',
+          pointRadius: 7,
+          pointHoverRadius: 9,
+          showLine: false,
+        },
+        {
+          label: '卖出',
+          data: sellData,
+          backgroundColor: 'rgba(255, 100, 100, 1)',
+          borderColor: 'rgba(255, 100, 100, 1)',
+          pointRadius: 7,
+          pointHoverRadius: 9,
+          showLine: false,
+        },
+        {
+          label: 'MA150',
+          data: ma150Values,
+          borderColor: 'rgba(255, 150, 100, 0.8)',
+          borderWidth: 2,
+          borderDash: [5, 5],
+          fill: false,
+          tension: 0.3,
+          pointRadius: 0,
+          pointHoverRadius: 4,
+        },
+        {
+          label: `Trend Upper (${trendMultiple})`,
+          data: trendUpperValues,
+          borderColor: 'rgba(255, 100, 100, 0.8)',
+          borderWidth: 2,
+          borderDash: [5, 5],
+          fill: false,
+          tension: 0.3,
+          pointRadius: 0,
+          pointHoverRadius: 4,
+        },
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: true, position: 'top' },
+        zoneBackground: {},
+      },
+      scales: {
+        x: {
+          title: { display: true, text: 'Date' },
+          max: labels.length - 1,
+        },
+        y: {
+          title: { display: true, text: 'Price' },
+        },
+      },
+    },
+    plugins: [backgroundPlugin],
+  });
+}
 
 </script>
 </body>

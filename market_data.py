@@ -49,12 +49,12 @@ SOURCE_OPTIONS: Dict[str, List[Tuple[str, str]]] = {
     "A_QUOTE_SOURCE": [
         ("live_a1", "腾讯实时"),
         ("live_a2", "雪球实时"),
-        ("live_a3", "EasyQuotation(新浪源)"),   # 改为 EasyQuotation 新浪源
+        ("live_a3", "新浪实时"),
     ],
     "HK_MARKET_SOURCE": [
         ("live_hk1", "腾讯港股"),
         ("live_hk2", "雪球港股"),
-        ("live_hk3", "东方财富港股"),           # 保留东方财富港股接口
+        ("live_hk3", "新浪港股"),
     ],
     "A_BACKTEST_SOURCE": [
         ("historical_a1", "腾讯A股/ETF日K"),
@@ -1100,37 +1100,59 @@ def _fetch_eastmoney_hk_realtime_price(symbol: str, price_scale: float) -> Tuple
     raise RuntimeError(f"东方财富港股实时失败: {last_err}")
 
 
-# ==================== A股 EasyQuotation 新浪源（替代原东方财富实时） ====================
-def _fetch_easyquotation_a_realtime_price(symbol: str, price_scale: float) -> Tuple[float, Optional[str]]:
-    """使用 EasyQuotation (新浪源) 获取 A 股/ETF 实时价格"""
-    try:
-        import easyquotation
-    except ImportError as e:
-        raise RuntimeError("easyquotation 未安装，请运行 pip install easyquotation") from e
-
-    # 提取纯数字代码
-    raw = str(symbol or "").upper().strip()
-    if raw.startswith("SH") or raw.startswith("SZ"):
-        code = raw[2:]
-    else:
-        code = raw
-
-    q = easyquotation.use('sina')
-    data = q.real(code)
-    item = data.get(code)
-    if not item:
-        raise RuntimeError(f"EasyQuotation(新浪源) 未返回 {symbol} 数据")
-    price = float(item.get('now', 0))
+def _fetch_sina_hk_realtime_price(symbol: str, price_scale: float) -> Tuple[float, Optional[str]]:
+    """新浪港股实时行情，直接 HTTP 调用 hq.sinajs.cn。"""
+    code = _hk_code(symbol)
+    resp = requests.get(f"https://hq.sinajs.cn/list=rt_hk{code}", headers=_headers("https://finance.sina.com.cn/"), timeout=8)
+    resp.raise_for_status()
+    resp.encoding = "gbk"
+    text = resp.text.strip()
+    if '="' not in text:
+        raise RuntimeError(f"新浪港股返回无法解析: {text[:120]}")
+    data = text.split('="', 1)[1].rsplit('"', 1)[0]
+    fields = data.split(",")
+    if len(fields) < 7:
+        raise RuntimeError(f"新浪港股返回字段不足: {text[:120]}")
+    price = float(fields[6]) if fields[6] else 0.0
     if price <= 0:
         # 非交易时段，尝试使用昨收价
-        price = float(item.get('close', 0))
+        price = float(fields[3]) if fields[3] else 0.0
         if price <= 0:
-            raise RuntimeError(f"EasyQuotation(新浪源) 返回价格为0: {item}")
-    # 新浪源返回的日期格式：'date': '2026-06-02', 'time': '15:00:00'
-    date_str = item.get('date')
-    time_str = item.get('time')
+            raise RuntimeError(f"新浪港股价格为0: {text[:120]}")
     quote_date = None
-    if date_str:
+    if len(fields) > 18 and fields[17]:
+        date_str = fields[17].replace("/", "-")
+        time_str = fields[18]
+        if time_str and len(time_str) >= 5:
+            quote_date = f"{date_str} {time_str[:5]}"
+        else:
+            quote_date = date_str
+    return round(price * float(price_scale), 4), quote_date
+
+
+# ==================== A股 EasyQuotation 新浪源（替代原东方财富实时） ====================
+def _fetch_easyquotation_a_realtime_price(symbol: str, price_scale: float) -> Tuple[float, Optional[str]]:
+    """新浪实时行情（EasyQuotation 同源接口，直接 HTTP 调用，不依赖 easyquotation 包）"""
+    s_symbol = _tencent_a_symbol(symbol)
+    resp = requests.get(f"https://hq.sinajs.cn/list={s_symbol}", headers=_headers("https://finance.sina.com.cn/"), timeout=8)
+    resp.raise_for_status()
+    resp.encoding = "gbk"
+    text = resp.text.strip()
+    if '="' not in text:
+        raise RuntimeError(f"新浪实时返回无法解析: {text[:120]}")
+    data = text.split('="', 1)[1].rsplit('"', 1)[0]
+    fields = data.split(",")
+    if len(fields) < 4:
+        raise RuntimeError(f"新浪实时返回字段不足: {text[:120]}")
+    price = float(fields[3]) if fields[3] else 0.0
+    if price <= 0:
+        # 非交易时段，尝试使用昨收价
+        price = float(fields[2]) if fields[2] else 0.0
+        if price <= 0:
+            raise RuntimeError(f"新浪实时价格为0: {text[:120]}")
+    quote_date = None
+    if len(fields) > 31 and fields[30]:
+        date_str, time_str = fields[30], fields[31]
         if time_str and len(time_str) >= 5:
             quote_date = f"{date_str} {time_str[:5]}"
         else:
@@ -1161,7 +1183,7 @@ def _fetch_hk_realtime_price(symbol: str, price_scale: float) -> Tuple[float, Op
     sources = _preferred_order([
         ("live_hk1", _fetch_tencent_hk_realtime_price),
         ("live_hk2", _fetch_xueqiu_realtime_price),
-        ("live_hk3", _fetch_eastmoney_hk_realtime_price),   # 保留东方财富港股接口
+        ("live_hk3", _fetch_sina_hk_realtime_price),
     ], preferred)
     errors = []
     for key, fn in sources:
@@ -1288,7 +1310,7 @@ def _realtime_source_functions_for_symbol(symbol: str):
         return [
             ("live_hk1", _fetch_tencent_hk_realtime_price),
             ("live_hk2", _fetch_xueqiu_realtime_price),
-            ("live_hk3", _fetch_eastmoney_hk_realtime_price),
+            ("live_hk3", _fetch_sina_hk_realtime_price),
         ], "HK_MARKET_SOURCE"
     return [
         ("live_a1", _fetch_tencent_a_realtime_price),

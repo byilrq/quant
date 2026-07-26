@@ -2377,7 +2377,6 @@ def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", re
         write_market_skip_snapshot(name, symbol, quant_state, reason, level="ERROR", last_known_price=last_valid_price)
         return _maybe_market_alert(quant_state, msg, reason)
 
-
     # 缓存状态页参考价；交易时段内后台每轮刷新当前标的的全部实时源。
     # Web 页面仅读缓存，避免每次打开页面都直接阻塞拉行情。
     if refresh_reference:
@@ -3153,6 +3152,7 @@ def main_loop():
                     f"⏸️ 非交易时段，已恢复回滚点但跳过立即重跑 seq={restore_rerun_seq}，"
                     f"目标={','.join(restore_rerun_targets) or 'ALL'}。"
                 )
+
             sleep_until_next_loop_or_web_request(state, STRATEGY.get("loop_interval", 60))
             continue
 

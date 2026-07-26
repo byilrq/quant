@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import ast
+import csv
 import json
+import logging
 import re
 import secrets
 import subprocess
@@ -89,9 +91,7 @@ app = Flask(
 APP_DISPLAY_NAME = "闲云量化"
 
 PAGE_TITLES = {
-    "symbols": "标的",
-    "status": "状态",
-    "params": "参数",
+    "status": "标的",
     "backtest": "回测",
     "push": "系统",
 }
@@ -394,7 +394,7 @@ DCF_NAV_STYLE = """
 <style id="quant-responsive-nav-style">
 .nav {
   display: grid !important;
-  grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
   gap: 10px !important;
   align-items: stretch !important;
 }
@@ -1574,6 +1574,10 @@ def _filter_reference_prices_for_symbol(symbol_text: str, refs: List[Dict[str, A
             card.setdefault("price", None)
             card.setdefault("date", "")
             card.setdefault("error", "")
+            if "easyquotation 未安装" in str(card.get("error", "")):
+                card["ok"] = False
+                card["price"] = None
+                card["error"] = "待刷新"
         else:
             card = {
                 "key": key,
@@ -2214,7 +2218,15 @@ def save_system_config_from_form() -> Dict[str, str]:
     cfg = read_system_config()
     for key in SYSTEM_DEFAULTS:
         if key in request.form:
-            cfg[key] = (request.form.get(key, "") or "").strip()
+            value = (request.form.get(key, "") or "").strip()
+            if key == "XUEQIU_TOKEN" and value and ("=" in value or ";" in value):
+                extracted = _extract_xueqiu_token_from_cookie(value)
+                if extracted:
+                    value = extracted
+            cfg[key] = value
+            if key == "XUEQIU_TOKEN" and value:
+                cfg["XUEQIU_TOKEN_UPDATED_AT"] = current_time_text()
+                cfg["XUEQIU_TOKEN_SOURCE"] = "web_manual"
     return write_system_config(cfg)
 
 
@@ -3025,7 +3037,7 @@ def _handle_symbol_actions(config: Dict[str, Any], selected: str):
     if action == "set_symbol":
         new_selected = (request.form.get("symbol_key", "") or "").strip()
         session["selected_symbol_key"] = new_selected or selected
-        return redirect(url_for("symbols_page"))
+        return redirect(url_for("status_page"))
     if action == "add_symbol":
         symbol_name = (request.form.get("new_name", "") or "").strip()
         symbol_code = normalize_symbol_input(request.form.get("new_symbol", ""))
@@ -3039,7 +3051,7 @@ def _handle_symbol_actions(config: Dict[str, Any], selected: str):
                 config.setdefault("SYMBOL_CONFIG", {})[symbol_name] = build_new_symbol_section(config, symbol_code)
                 write_yaml(config)
                 flash(f"已新增标的：{symbol_name} ({symbol_code})", "success")
-                return redirect(url_for("symbols_page", symbol_key=symbol_name))
+                return redirect(url_for("status_page", symbol_key=symbol_name))
     elif action == "delete_symbol":
         if selected == "COMMON_BACKTEST_CONFIG":
             flash("通用回测参数不可删除。", "error")
@@ -3056,7 +3068,7 @@ def _handle_symbol_actions(config: Dict[str, Any], selected: str):
                     f"已删除标的：{selected}，并清理运行状态、回滚点 {cleanup_stats.get('state_backups', 0)} 条、快照记录 {cleanup_stats.get('snapshots', 0)} 条。",
                     "success",
                 )
-                return redirect(url_for("symbols_page", symbol_key="COMMON_BACKTEST_CONFIG"))
+                return redirect(url_for("status_page"))
             flash("未找到要删除的标的。", "error")
     return None
 
@@ -3072,12 +3084,7 @@ def symbols_page():
         redirect_resp = _handle_symbol_actions(config, selected)
         if redirect_resp is not None:
             return redirect_resp
-        config = read_yaml()
-        selected = _selected_key(config)
-    ctx = _base_context(config, selected)
-    ctx["symbol_cards"] = build_symbol_cards(config, selected, include_common=False)
-    ctx.update({"page_name": "symbols"})
-    return render_template("dashboard.html", **ctx)
+    return redirect(url_for("status_page"))
 
 @app.route("/status", methods=["GET"])
 def status_page():
@@ -3211,10 +3218,67 @@ def params_page():
     if request.method == "POST" and request.form.get("action") == "save_params":
         _save_all_params(config, selected)
         flash("参数已保存到 quant.yaml", "success")
-        return redirect(url_for("params_page"))
-    ctx = _base_context(config, selected)
-    ctx.update({"page_name": "params"})
-    return render_template("dashboard.html", **ctx)
+    return redirect(url_for("status_page"))
+
+@app.route("/api/backtest-chart/<symbol>")
+def api_backtest_chart(symbol):
+    symbol = normalize_symbol_input(symbol)
+    if not symbol:
+        return jsonify({"error": "Invalid symbol"}), 400
+    outdir = BACKTEST_OUT_DIR / symbol
+    daily_details_path = outdir / f"daily_details_{symbol}.csv"
+    trades_path = outdir / f"trades_{symbol}.csv"
+
+    if not daily_details_path.exists():
+        return jsonify({"error": f"No backtest data found at {daily_details_path}"}), 404
+
+    try:
+        daily_data = []
+        with open(daily_details_path, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            if not reader:
+                return jsonify({"error": "CSV has no headers"}), 400
+            for row in reader:
+                try:
+                    price = float(row.get("raw_price", 0) or 0)
+                    ma150_str = row.get("ma150", "")
+                    ma150 = float(ma150_str) if ma150_str and ma150_str.strip() else None
+
+                    trend_upper_str = row.get("trend_upper", "")
+                    trend_upper = float(trend_upper_str) if trend_upper_str and trend_upper_str.strip() else None
+
+                    daily_data.append({
+                        "date": row.get("date", ""),
+                        "price": price,
+                        "ma150": ma150,
+                        "trend_upper": trend_upper,
+                        "zone": row.get("zone", ""),
+                        "holding": row.get("holding", "0"),
+                    })
+                except Exception as e:
+                    logging.error(f"Error parsing row: {row}, {e}")
+                    continue
+
+        trades = []
+        if trades_path.exists():
+            with open(trades_path, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    try:
+                        trades.append({
+                            "date": row.get("date", ""),
+                            "action": row.get("action", ""),
+                            "price": float(row.get("raw_price", 0) or 0),
+                        })
+                    except Exception as e:
+                        logging.error(f"Error parsing trade: {row}, {e}")
+                        continue
+
+        return jsonify({"data": daily_data, "trades": trades})
+    except Exception as e:
+        logging.error(f"api_backtest_chart error: {e}")
+        return jsonify({"error": f"Error: {str(e)}"}), 500
+
 
 @app.route("/backtest", methods=["GET", "POST"])
 def backtest_page():
@@ -3223,6 +3287,7 @@ def backtest_page():
     backtest_output = ""
     backtest_cards = []
     backtest_files = {}
+    chart_symbol = ""
     if request.method == "POST" and request.form.get("action") == "run_backtest":
         bt_symbol = normalize_symbol_input(request.form.get("bt_symbol", "") or _base_context(config, selected)["bt_symbol_default"])
         bt_initial = (request.form.get("bt_initial_units", "") or "").strip()
@@ -3234,9 +3299,10 @@ def backtest_page():
             backtest_output = result.get("output", "")
             backtest_cards = result.get("summary_cards", [])
             backtest_files = result.get("files", {})
+            chart_symbol = bt_symbol
             flash("回测执行完成。", "success")
     ctx = _base_context(config, selected)
-    ctx.update({"page_name": "backtest", "backtest_output": backtest_output, "backtest_cards": backtest_cards, "backtest_files": backtest_files})
+    ctx.update({"page_name": "backtest", "backtest_output": backtest_output, "backtest_cards": backtest_cards, "backtest_files": backtest_files, "chart_symbol": chart_symbol})
     return render_template("dashboard.html", **ctx)
 
 
@@ -3273,14 +3339,18 @@ def _extract_xueqiu_token_from_cookie(text: str) -> str:
     m = re.search(r"(?:^|;\s*)xq_a_token=([^;\s]+)", str(text or ""))
     return m.group(1).strip() if m else ""
 
+def _mask_token(token: str) -> str:
+    token = str(token or "").strip()
+    if not token:
+        return ""
+    if len(token) <= 8:
+        return token
+    return token[:4] + "*" * (len(token) - 8) + token[-4:]
+
 @app.route("/tokenapi", methods=["POST", "OPTIONS"])
 def tokenapi_update_xueqiu_cookie():
     if request.method == "OPTIONS":
         return _token_api_response({"ok": True})
-    expected = ensure_web_config_token_api_key()
-    provided = _get_tokenapi_key_from_request()
-    if not expected or not secrets.compare_digest(str(provided), str(expected)):
-        return _token_api_response({"ok": False, "message": "API key 无效"}, 401)
     data = request.get_json(silent=True) if request.is_json else {}
     if not isinstance(data, dict):
         data = {}
@@ -3288,12 +3358,12 @@ def tokenapi_update_xueqiu_cookie():
     token = str(data.get("token") or "").strip()
     if not token and cookie:
         token = _extract_xueqiu_token_from_cookie(cookie)
-    if cookie:
-        saved_value = cookie
-        mode = "cookie"
-    elif token:
+    if token:
         saved_value = token
         mode = "token"
+    elif cookie:
+        saved_value = cookie
+        mode = "cookie"
     else:
         return _token_api_response({"ok": False, "message": "缺少 token 或 cookie"}, 400)
     cfg = read_system_config()
@@ -3350,10 +3420,14 @@ def push_page():
     config = read_yaml()
     selected = _selected_key(config)
     ctx = _base_context(config, selected)
+    system_cfg = read_system_config()
     ctx.update({
         "page_name": "push",
         "system_config_path": str(SYSTEM_CONFIG_FILE),
-        "system_config": read_system_config(),
+        "system_config": system_cfg,
+        "system_config_masked_token": _mask_token(system_cfg.get("XUEQIU_TOKEN", "")),
+        "system_config_token_updated_at": system_cfg.get("XUEQIU_TOKEN_UPDATED_AT", ""),
+        "system_config_token_source": system_cfg.get("XUEQIU_TOKEN_SOURCE", ""),
         "system_select_options": SYSTEM_SELECT_OPTIONS,
         "push_config_path": str(PUSH_CONFIG_FILE),
         "push_log_path": str(PUSH_LOG_FILE),

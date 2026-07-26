@@ -864,6 +864,7 @@ def backtest(symbol: str, name: str, cfg: dict, strategy: dict, days: int, outdi
         if ma150_raw is None:
             ma150 = adj_price
             zone = 'BOX_ZONE'
+            trend_multiple = None
         else:
             sideways_score = float(compute_sideways_index(closes_adj, cfg))
             base_k150 = _safe_float(cfg.get("k150", 1.0), 1.0)
@@ -873,6 +874,9 @@ def backtest(symbol: str, name: str, cfg: dict, strategy: dict, days: int, outdi
             dynamic_k150 = min_k150 + (base_k150 - min_k150) * (1.0 - sideways_score)
             ma150 = ma150_raw * dynamic_k150
             zone = get_zone(adj_price, ma150, cfg)
+
+            trend_multiple = _safe_float(cfg.get("trend_multiple", 1.25), 1.25)
+            box_multiple = _safe_float(cfg.get("box_multiple", 1.25), 1.25)
 
         # 构建状态字典（符合策略接口要求）
         state_dict = {
@@ -964,11 +968,17 @@ def backtest(symbol: str, name: str, cfg: dict, strategy: dict, days: int, outdi
             max_dd_ref = max(max_dd_ref, (peak_value - cur_value) / peak_value)
 
         # 记录每日详情（pyramid_add 和 pyramid_sell 取自当前 cfg）
+        trend_upper = None
+        if ma150 is not None:
+            trend_multiple = _safe_float(cfg.get("trend_multiple", 1.25), 1.25)
+            trend_upper = ma150 * trend_multiple
+
         daily_records.append({
             "date": dt,
             "raw_price": raw_price,
             "restor_price": adj_price,
             "ma150": round(ma150, 4) if ma150 is not None else None,
+            "trend_upper": round(trend_upper, 4) if trend_upper is not None else None,
             "zone": zone,
             "holding": format_units_for_display(units, position_mode),
             "pyramid_add": get_pyramid_add_enabled(cfg),
@@ -979,13 +989,14 @@ def backtest(symbol: str, name: str, cfg: dict, strategy: dict, days: int, outdi
     daily_details_path = outdir / f"daily_details_{symbol}.csv"
     with open(daily_details_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["date", "raw_price", "restor_price", "ma150", "zone", "holding", "pyramid_add", "pyramid_sell"])
+        writer.writerow(["date", "raw_price", "restor_price", "ma150", "trend_upper", "zone", "holding", "pyramid_add", "pyramid_sell"])
         for rec in daily_records:
             writer.writerow([
                 rec["date"],
                 f"{rec['raw_price']:.4f}",
                 f"{rec['restor_price']:.4f}",
                 f"{rec['ma150']:.4f}" if rec["ma150"] is not None else "",
+                f"{rec['trend_upper']:.4f}" if rec.get("trend_upper") is not None else "",
                 rec["zone"] if rec["zone"] is not None else "",
                 rec["holding"],
                 rec.get("pyramid_add", ""),

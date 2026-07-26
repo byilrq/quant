@@ -214,7 +214,12 @@ def append_push_log(channel: str, success: bool, detail: str, body: Any = "", ti
         PUSH_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
         log_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         safe_detail = str(detail).replace(chr(10), " ")[:500]
-        line = f"{log_time} | {channel} | {'成功' if success else '失败'} | {safe_detail}\n"
+        status = '成功' if success else '失败'
+        title_str = str(title or "").strip()
+        if title_str:
+            line = f"{log_time} | {title_str} | {channel}:{status}\n"
+        else:
+            line = f"{log_time} | {channel} | {status} | {safe_detail}\n"
         with PUSH_LOG_FILE.open("a", encoding="utf-8") as file_obj:
             file_obj.write(line)
         if body:
@@ -425,7 +430,7 @@ def send_notification(msg: str, title: str = "Quant 推送", config: Dict[str, A
         result = f"Gotify:{'成功' if ok else '失败'}"
     else:
         ok, detail = _send_ntfy_detail(msg, cfg, title=title)
-        result = f"ntfy:{'成功' if ok else '失败'} | {detail}"
+        result = detail
     append_push_log(channel, ok, result, body=msg, title=title, kind="notification")
     return ok
 
