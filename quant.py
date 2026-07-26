@@ -385,14 +385,20 @@ def rotate_and_backup_logs(now: datetime = None):
     log_file = BASE_DIR / "quant.log"
     backup_date = (now.date() - timedelta(days=1))
     backup_file = LOG_DIR / f"quant.{backup_date.strftime('%Y%m%d')}.log"
+
     if not log_file.exists():
+        logging.info("ℹ️ quant.log 不存在，跳过日志轮转")
         return False
+
     try:
         # 1. 关闭所有 logger handlers，停止写入原文件
         logger = logging.getLogger()
         for handler in logger.handlers[:]:
-            handler.close()
-            logger.removeHandler(handler)
+            try:
+                handler.close()
+                logger.removeHandler(handler)
+            except Exception as e:
+                print(f"关闭 handler 失败: {e}")
 
         # 2. 重命名当前日志文件作为备份（原子操作，不丢失数据）
         if log_file.exists():
@@ -409,7 +415,10 @@ def rotate_and_backup_logs(now: datetime = None):
         return True
     except Exception as e:
         print(f"日志轮转失败: {e}")
-        setup_logging()
+        try:
+            setup_logging()
+        except Exception as e2:
+            print(f"日志轮转失败后恢复日志系统也失败: {e2}")
         return False
 
 def setup_logging():
@@ -581,11 +590,15 @@ def load_state():
                     state[name] = normalize_symbol_state(name, cfg, state[name])
             if "_meta" not in state:
                 state["_meta"] = {
-                    "last_daily_push_date": None,
-                    "last_log_rotate_date": None
+                    "last_daily_push_date": strategy_now().date().isoformat(),
+                    "last_log_rotate_date": strategy_now().date().isoformat()
                 }
-            elif "last_log_rotate_date" not in state["_meta"]:
-                state["_meta"]["last_log_rotate_date"] = None
+            else:
+                # 确保两个字段存在（旧状态兼容）
+                if "last_log_rotate_date" not in state["_meta"]:
+                    state["_meta"]["last_log_rotate_date"] = strategy_now().date().isoformat()
+                if "last_daily_push_date" not in state["_meta"]:
+                    state["_meta"]["last_daily_push_date"] = strategy_now().date().isoformat()
             return state
         except Exception as e:
             logging.error(f"加载状态文件失败: {e}")
@@ -593,9 +606,10 @@ def load_state():
     initial_state = {}
     for name, cfg in SYMBOL_CONFIG.items():
         initial_state[name] = build_default_symbol_state(cfg)
+    today = strategy_now().date().isoformat()
     initial_state["_meta"] = {
-        "last_daily_push_date": None,
-        "last_log_rotate_date": None
+        "last_daily_push_date": today,
+        "last_log_rotate_date": today
     }
     return initial_state
 
@@ -3006,10 +3020,12 @@ def main_loop():
         logging.info(f" {status_icon} {name}: {strategy_run.upper()}")
     logging.info("=" * 60)
     state = load_state()
+    # load_state() 已确保 _meta 中有 last_daily_push_date 和 last_log_rotate_date
     if "_meta" not in state:
+        today = strategy_now().date().isoformat()
         state["_meta"] = {
-            "last_daily_push_date": None,
-            "last_log_rotate_date": None,
+            "last_daily_push_date": today,
+            "last_log_rotate_date": today,
         }
     last_config_reload_seq = _safe_int(state.get("_meta", {}).get("config_reload_seq", 0), 0)
     last_system_config_seq = _safe_int(state.get("_meta", {}).get("system_config_seq", 0), 0)
@@ -3031,35 +3047,33 @@ def main_loop():
             logging.info("=" * 60)
             logging.info(f"🔄 开始执行日志轮转 - {now.strftime('%Y-%m-%d %H:%M:%S')}")
             logging.info("=" * 60)
-            rotate_success = rotate_and_backup_logs(now)
-            if rotate_success:
-                log_dir = os.path.join(BASE_DIR, "log")
-                try:
-                    clean_old_quant_logs(log_dir=log_dir, keep=7)
-                except Exception as e:
-                    logging.exception(f"❌ 执行日志清理函数失败: {e}")
+            rotate_and_backup_logs(now)
+            log_dir = os.path.join(BASE_DIR, "log")
+            try:
+                clean_old_quant_logs(log_dir=log_dir, keep=7)
+            except Exception as e:
+                logging.exception(f"❌ 执行日志清理函数失败: {e}")
+            try:
+                prune_strategy_history_cache()
+                logging.info("🧹 已清理旧策略缓存文件（仅保留今日）")
+            except Exception as e:
+                logging.exception(f"❌ 清理策略缓存失败: {e}")
 
-                # 清理非当日的策略缓存文件（全局）
-                try:
-                    prune_strategy_history_cache()
-                    logging.info("🧹 已清理旧策略缓存文件（仅保留今日）")
-                except Exception as e:
-                    logging.exception(f"❌ 清理策略缓存失败: {e}")
-
-                snapshot = build_daily_snapshot(state)
-                logging.info("=" * 60)
-                logging.info("📌每日快照内容:")
-                logging.info("=" * 60)
-                logging.info(snapshot)
-                logging.info("=" * 60)
-
-                state["_meta"]["last_log_rotate_date"] = now.date().isoformat()
+            # 保存日志轮转状态（重试机制）
+            today_str = now.date().isoformat()
+            meta = state.setdefault("_meta", {})
+            meta["last_log_rotate_date"] = today_str
+            try:
                 save_state(state)
+                logging.info("✅ 日志轮转状态已保存")
+            except Exception as e:
+                logging.error(f"❌ 保存日志轮转状态失败: {e}，将在下一轮重试")
+                # 不中断流程，继续执行其他操作
+            logging.info("=" * 60)
+            logging.info("✅ 日志轮转完成")
+            logging.info("=" * 60)
 
-                logging.info("=" * 60)
-                logging.info("✅ 日志轮转完成")
-                logging.info("=" * 60)
-
+        # 每日快照推送（独立于日志轮转）
         if should_do_daily_push(state, now):
             snapshot = build_daily_snapshot(state)
             logging.info("=" * 60)
@@ -3067,16 +3081,29 @@ def main_loop():
             logging.info("=" * 60)
             logging.info(snapshot)
             logging.info("=" * 60)
+
+            snapshot_sent = False
             try:
                 snapshot_sent = send_notification(snapshot, title="每日快照")
                 if snapshot_sent:
                     logging.info("✅ 每日快照推送成功")
                 else:
-                    logging.error("❌ 每日快照推送失败")
+                    logging.error("❌ 每日快照推送失败（返回 False）")
             except Exception as e:
-                logging.error(f"❌ 推送每日快照失败: {e}")
-            state["_meta"]["last_daily_push_date"] = now.date().isoformat()
-            save_state(state)
+                logging.error(f"❌ 推送每日快照异常: {e}")
+
+            # 只有推送成功才更新状态，防止重复推送
+            if snapshot_sent:
+                today_str = now.date().isoformat()
+                meta = state.setdefault("_meta", {})
+                meta["last_daily_push_date"] = today_str
+                try:
+                    save_state(state)
+                    logging.info("✅ 每日快照推送状态已保存")
+                except Exception as e:
+                    logging.error(f"❌ 保存快照推送状态失败: {e}，下一轮将重新推送")
+            else:
+                logging.warning("⚠️ 快照推送失败，将在下一轮重新尝试")
 
         # 策略运行总开关（STRATEGY.loop_enabled）
         if str(STRATEGY.get("loop_enabled", "yes") or "yes").strip().lower() not in ("yes", "1", "true", "on"):
