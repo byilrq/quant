@@ -599,13 +599,13 @@
     .strategy-switch{position:relative;z-index:2;display:inline-flex;align-items:center;gap:8px;min-height:38px;padding:6px 8px 6px 10px;border-radius:999px;border:1px solid rgba(148,163,184,.22);background:rgba(255,255,255,.055);box-shadow:inset 0 1px 0 rgba(255,255,255,.08);backdrop-filter:blur(12px) saturate(125%);-webkit-backdrop-filter:blur(12px) saturate(125%);cursor:pointer;user-select:none;white-space:nowrap;}
     .strategy-switch-label{font-size:13px;font-weight:700;color:rgba(226,236,248,.84);letter-spacing:.2px;}
     .strategy-switch input{position:absolute;opacity:0;pointer-events:none;}
-    .strategy-slider{position:relative;width:44px;height:24px;border-radius:999px;background:rgba(15,23,42,.45);border:1px solid rgba(148,163,184,.28);box-shadow:inset 0 1px 4px rgba(0,0,0,.28);transition:background .2s ease,border-color .2s ease;}
-    .strategy-slider::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:linear-gradient(180deg,#ffffff,#cbd5e1);box-shadow:0 2px 8px rgba(0,0,0,.30);transition:transform .22s ease,background .2s ease;}
-    .strategy-switch input:checked + .strategy-slider{background:linear-gradient(135deg,#047857,#0f766e);border-color:rgba(94,234,212,.48);}
-    .strategy-switch input:checked + .strategy-slider::after{transform:translateX(20px);background:linear-gradient(180deg,#ecfeff,#99f6e4);}
+    .strategy-slider{position:relative;width:44px;height:24px;border-radius:999px;background:rgba(15,23,42,.55);border:1px solid rgba(148,163,184,.28);box-shadow:inset 0 1px 4px rgba(0,0,0,.28);transition:background .2s ease,border-color .2s ease;}
+    .strategy-slider::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:linear-gradient(180deg,#f87171,#dc2626);box-shadow:0 2px 8px rgba(0,0,0,.30);transition:transform .22s ease,background .2s ease;}
+    .strategy-switch input:checked + .strategy-slider{background:rgba(15,23,42,.55);border-color:rgba(148,163,184,.28);}
+    .strategy-switch input:checked + .strategy-slider::after{transform:translateX(20px);background:linear-gradient(180deg,#4ade80,#16a34a);}
     body:not(.theme-x3-dark) .strategy-switch{background:rgba(15,23,42,.035);border-color:rgba(15,23,42,.10);box-shadow:inset 0 1px 0 rgba(255,255,255,.72);}
     body:not(.theme-x3-dark) .strategy-switch-label{color:rgba(51,65,85,.82);}
-    body:not(.theme-x3-dark) .strategy-slider{background:#e5e7eb;border-color:rgba(15,23,42,.12);box-shadow:inset 0 1px 3px rgba(15,23,42,.12);}
+    body:not(.theme-x3-dark) .strategy-slider{background:#d9d3cc;border-color:rgba(60,50,40,.16);box-shadow:inset 0 1px 3px rgba(15,23,42,.12);}
     @media (max-width:640px){.strategy-switch-label{display:none}.strategy-switch{padding:6px}.strategy-slider{width:42px;}}
     body:not(.theme-x3-dark) .push-field-help{color:#64748b;}
     body:not(.theme-x3-dark) .push-field-row{border-bottom-color:rgba(15,23,42,.08);}
@@ -1310,9 +1310,13 @@ body:not(.theme-x3-dark) .theme-slider,
 body.theme-x3-light .strategy-slider,
 body:not(.theme-x3-dark) .strategy-slider{background:#d9d3cc;border-color:rgba(60,50,40,.12);}
 body.theme-x3-light #theme-toggle:checked + .theme-slider,
-body:not(.theme-x3-dark) #theme-toggle:checked + .theme-slider,
+body:not(.theme-x3-dark) #theme-toggle:checked + .theme-slider{background:linear-gradient(135deg,#8a7a6a,#6a5c4e);border-color:rgba(60,50,40,.35);}
 body.theme-x3-light .strategy-switch input:checked + .strategy-slider,
-body:not(.theme-x3-dark) .strategy-switch input:checked + .strategy-slider{background:linear-gradient(135deg,#8a7a6a,#6a5c4e);border-color:rgba(60,50,40,.35);}
+body:not(.theme-x3-dark) .strategy-switch input:checked + .strategy-slider{background:#d9d3cc;border-color:rgba(60,50,40,.16);}
+body.theme-x3-light .strategy-slider::after,
+body:not(.theme-x3-dark) .strategy-slider::after{background:linear-gradient(180deg,#f87171,#dc2626);}
+body.theme-x3-light .strategy-switch input:checked + .strategy-slider::after,
+body:not(.theme-x3-dark) .strategy-switch input:checked + .strategy-slider::after{background:linear-gradient(180deg,#4ade80,#16a34a);}
 body.theme-x3-light .panel-toggle-slider,
 body:not(.theme-x3-dark) .panel-toggle-slider{background:#d9d3cc;border-color:rgba(60,50,40,.12);}
 body.theme-x3-light .panel-toggle input:checked + .panel-toggle-slider,
@@ -1771,7 +1775,6 @@ body:not(.theme-x3-dark) .panel-toggle input:checked + .panel-toggle-slider{back
         <div class="section-header between">
           <div>
             <h2>行情源设置</h2>
-            <p class="section-note">系统配置文件：{{ system_config_path }}。选择后会作为对应市场的第一优先行情源，后续源自动作为备用。</p>
           </div>
           <label class="panel-toggle" title="显示或隐藏行情源设置">
             <span class="panel-toggle-text">显示配置</span>
@@ -1857,7 +1860,6 @@ body:not(.theme-x3-dark) .panel-toggle input:checked + .panel-toggle-slider{back
         <div class="section-header between">
           <div>
             <h2>系统运行设置</h2>
-            <p class="section-note">写入 quant.yaml 的 STRATEGY 区块；保存后主程序会在下一轮循环即时读取。</p>
           </div>
           <div style="display:flex;align-items:center;gap:14px;">
             <label class="panel-toggle" title="显示或隐藏系统运行设置">
@@ -1896,7 +1898,6 @@ body:not(.theme-x3-dark) .panel-toggle input:checked + .panel-toggle-slider{back
         <div class="section-header between">
           <div>
             <h2>推送配置</h2>
-            <p class="section-note">配置文件：{{ push_config_path }}</p>
           </div>
           <label class="panel-toggle" title="显示或隐藏推送配置">
             <span class="panel-toggle-text">显示配置</span>
@@ -1950,7 +1951,6 @@ body:not(.theme-x3-dark) .panel-toggle input:checked + .panel-toggle-slider{back
         <div class="section-header between">
           <div>
             <h2>推送日志</h2>
-            <p class="section-note">显示 {{ push_log_path }} 最新 30 条。</p>
           </div>
           <div class="section-actions push-log-actions">
             <form method="post" action="{{ url_for('push_page') }}" onsubmit="return confirm('确认清空所有推送日志记录？');">
