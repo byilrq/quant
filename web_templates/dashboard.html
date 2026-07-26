@@ -383,6 +383,31 @@
       font-size:.94em;
     }
     .hidden{display:none !important;}
+    .backtest-chart-box{
+      margin-top:12px;
+      padding:14px 12px 10px;
+      border-radius:16px;
+      border:1px solid rgba(255,255,255,.13);
+      background:linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,.022));
+      box-shadow:0 10px 26px rgba(0,0,0,.14), inset 0 1px 0 rgba(255,255,255,.08);
+    }
+    .chart-loading-note{
+      text-align:center;
+      color:rgba(235,245,255,.62);
+      font-size:13px;
+      margin-top:10px;
+      letter-spacing:.3px;
+    }
+    body.theme-x3-light .backtest-chart-box,
+    body:not(.theme-x3-dark) .backtest-chart-box{
+      border-color:rgba(216,224,234,.98) !important;
+      background:#ffffff !important;
+      box-shadow:0 16px 40px rgba(30,46,66,.06) !important;
+    }
+    body.theme-x3-light .chart-loading-note,
+    body:not(.theme-x3-dark) .chart-loading-note{
+      color:#687687 !important;
+    }
     @media (max-width:640px){
       .backtest-run-actions{
         gap:8px;
@@ -1703,9 +1728,9 @@ body:not(.theme-x3-dark) .panel-toggle input:checked + .panel-toggle-slider{back
           <div class="section-header subhead">
             <h3>回测图表 - K线 + MA150 + 交易信号</h3>
           </div>
-          <div style="margin-top:12px;border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:12px;background:rgba(255,255,255,.03);" data-chart-symbol="{{ chart_symbol }}">
+          <div class="backtest-chart-box" data-chart-symbol="{{ chart_symbol }}">
             <canvas id="backtest-chart-canvas" style="width:100%;height:500px;display:block;"></canvas>
-            <div id="chart-loading" style="text-align:center;color:rgba(235,245,255,.58);font-size:13px;margin-top:10px;">加载图表数据中...</div>
+            <div id="chart-loading" class="chart-loading-note">加载图表数据中...</div>
           </div>
         {% endif %}
 
@@ -2144,6 +2169,10 @@ function applyTheme(theme){
   document.documentElement.setAttribute('data-quant-theme', dark ? 'dark' : 'light');
   const toggle = document.getElementById('theme-toggle');
   if(toggle){ toggle.checked = dark; }
+  const canvas = document.getElementById('backtest-chart-canvas');
+  if(canvas && window.__backtestChartData){
+    renderBacktestChart(canvas, window.__backtestChartData);
+  }
 }
 function initThemeToggle(){
   const saved = localStorage.getItem('quant_dashboard_theme') || 'dark';
@@ -2210,6 +2239,7 @@ function initBacktestChart(){
       }
       if(loading){ loading.style.display = 'none'; }
       if(data.data && data.data.length > 0){
+        window.__backtestChartData = data;
         renderBacktestChart(canvas, data);
       }else{
         if(loading) loading.textContent = 'No data to display';
@@ -2266,6 +2296,13 @@ function renderBacktestChart(canvas, data){
 
   const ctx = canvas.getContext('2d');
 
+  if(window.__backtestChartInstance){
+    window.__backtestChartInstance.destroy();
+    window.__backtestChartInstance = null;
+  }
+
+  const isDark = document.body.classList.contains('theme-x3-dark');
+
   const backgroundPlugin = {
     id: 'zoneBackground',
     beforeDatasetsDraw(chart) {
@@ -2273,14 +2310,26 @@ function renderBacktestChart(canvas, data){
       const xaxis = chart.scales.x;
       const yaxis = chart.scales.y;
 
+      const zoneColors = isDark ? {
+        BOX:    'rgba(56, 132, 255, 0.13)',
+        TREND:  'rgba(250, 204, 21, 0.10)',
+        CHANCE: 'rgba(45, 212, 191, 0.13)',
+        CLEAR:  'rgba(148, 163, 184, 0.14)',
+      } : {
+        BOX:    'rgba(47, 111, 235, 0.08)',
+        TREND:  'rgba(180, 83, 9, 0.07)',
+        CHANCE: 'rgba(37, 118, 79, 0.09)',
+        CLEAR:  'rgba(104, 118, 135, 0.10)',
+      };
+
       zones.forEach((zone, i) => {
         if(!zone || !xaxis || !yaxis) return;
 
         let bgColor = null;
-        if(zone.includes('BOX')) bgColor = 'rgba(100, 200, 255, 0.10)';
-        else if(zone.includes('TREND')) bgColor = 'rgba(255, 150, 100, 0.03)';
-        else if(zone.includes('CHANCE')) bgColor = 'rgba(200, 220, 100, 0.10)';
-        else if(zone.includes('CLEAR')) bgColor = 'rgba(200, 100, 150, 0.10)';
+        if(zone.includes('BOX')) bgColor = zoneColors.BOX;
+        else if(zone.includes('TREND')) bgColor = zoneColors.TREND;
+        else if(zone.includes('CHANCE')) bgColor = zoneColors.CHANCE;
+        else if(zone.includes('CLEAR')) bgColor = zoneColors.CLEAR;
 
         if(bgColor && i < labels.length - 1){
           const x0 = xaxis.getPixelForValue(i);
@@ -2289,13 +2338,30 @@ function renderBacktestChart(canvas, data){
           const y1 = yaxis.bottom;
 
           ctx.fillStyle = bgColor;
-          ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+          ctx.fillRect(x0, y0, x1 - x0 + 0.5, y1 - y0);
         }
       });
     }
   };
 
-  new Chart(ctx, {
+
+  const axisColor = isDark ? '#b9c4d1' : '#5b6a7b';
+  const gridColor = isDark ? 'rgba(150,175,210,.16)' : 'rgba(216,224,234,.85)';
+  const titleColor = isDark ? '#d7dee7' : '#314255';
+  const legendColor = isDark ? '#dbe2ea' : '#223244';
+  const tooltipBg = isDark ? 'rgba(10,18,32,.96)' : 'rgba(255,255,255,.98)';
+  const tooltipText = isDark ? '#dfe6ee' : '#223244';
+  const tooltipBorder = isDark ? 'rgba(140,175,220,.42)' : 'rgba(216,224,234,.98)';
+
+  Chart.defaults.color = legendColor;
+  Chart.defaults.borderColor = gridColor;
+  Chart.defaults.font.family = "system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif";
+
+  const priceGradient = ctx.createLinearGradient(0, 0, 0, canvas.height || 500);
+  priceGradient.addColorStop(0, isDark ? 'rgba(255,86,96,.26)' : 'rgba(217,70,95,.20)');
+  priceGradient.addColorStop(1, isDark ? 'rgba(255,86,96,0)' : 'rgba(217,70,95,0)');
+
+  window.__backtestChartInstance = new Chart(ctx, {
     type: 'line',
     data: {
       labels: labels,
@@ -2303,70 +2369,127 @@ function renderBacktestChart(canvas, data){
         {
           label: 'K线价格',
           data: prices,
-          borderColor: 'rgba(100, 150, 255, 0.9)',
-          backgroundColor: 'rgba(100, 150, 255, 0.05)',
-          borderWidth: 2.5,
-          fill: false,
-          tension: 0.3,
-          pointRadius: 1,
-          pointHoverRadius: 4,
-        },
-        {
-          label: '买入',
-          data: buyData,
-          backgroundColor: 'rgba(0, 200, 100, 1)',
-          borderColor: 'rgba(0, 200, 100, 1)',
-          pointRadius: 7,
-          pointHoverRadius: 9,
-          showLine: false,
-        },
-        {
-          label: '卖出',
-          data: sellData,
-          backgroundColor: 'rgba(255, 100, 100, 1)',
-          borderColor: 'rgba(255, 100, 100, 1)',
-          pointRadius: 7,
-          pointHoverRadius: 9,
-          showLine: false,
+          borderColor: isDark ? '#ff5b66' : '#d9465f',
+          backgroundColor: priceGradient,
+          borderWidth: 2.2,
+          fill: true,
+          tension: 0.25,
+          pointRadius: 0,
+          pointHoverRadius: 5,
+          pointHoverBackgroundColor: isDark ? '#ff5b66' : '#d9465f',
+          pointHoverBorderColor: isDark ? 'rgba(10,18,32,.92)' : '#ffffff',
+          pointHoverBorderWidth: 2,
+          order: 3,
         },
         {
           label: 'MA150',
           data: ma150Values,
-          borderColor: 'rgba(255, 150, 100, 0.8)',
-          borderWidth: 2,
-          borderDash: [5, 5],
+          borderColor: isDark ? '#fbbf24' : '#b45309',
+          borderWidth: 1.6,
+          borderDash: [7, 4],
           fill: false,
-          tension: 0.3,
+          tension: 0.25,
           pointRadius: 0,
           pointHoverRadius: 4,
+          order: 4,
         },
         {
           label: `Trend Upper (${trendMultiple})`,
           data: trendUpperValues,
-          borderColor: 'rgba(255, 100, 100, 0.8)',
-          borderWidth: 2,
-          borderDash: [5, 5],
+          borderColor: isDark ? '#7dd3fc' : '#2f6feb',
+          borderWidth: 1.6,
+          borderDash: [3, 4],
           fill: false,
-          tension: 0.3,
+          tension: 0.25,
           pointRadius: 0,
           pointHoverRadius: 4,
+          order: 5,
+        },
+        {
+          label: '买入',
+          data: buyData,
+          backgroundColor: isDark ? '#34d399' : '#15803d',
+          borderColor: isDark ? 'rgba(10,18,32,.9)' : '#ffffff',
+          borderWidth: 2,
+          pointStyle: 'triangle',
+          pointRadius: 8,
+          pointHoverRadius: 11,
+          showLine: false,
+          order: 1,
+        },
+        {
+          label: '卖出',
+          data: sellData,
+          backgroundColor: isDark ? '#c084fc' : '#7c3aed',
+          borderColor: isDark ? 'rgba(10,18,32,.9)' : '#ffffff',
+          borderWidth: 2,
+          pointStyle: 'rectRot',
+          pointRadius: 8,
+          pointHoverRadius: 11,
+          showLine: false,
+          order: 2,
         },
       ]
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      devicePixelRatio: window.devicePixelRatio || 2,
+      interaction: { mode: 'index', intersect: false },
+      layout: { padding: { top: 8, right: 12, bottom: 4, left: 4 } },
       plugins: {
-        legend: { display: true, position: 'top' },
+        legend: {
+          display: true,
+          position: 'top',
+          align: 'end',
+          labels: {
+            color: legendColor,
+            usePointStyle: true,
+            pointStyle: 'circle',
+            boxWidth: 8,
+            boxHeight: 8,
+            padding: 16,
+            font: { size: 12, weight: '600' },
+          },
+        },
+        tooltip: {
+          backgroundColor: tooltipBg,
+          titleColor: tooltipText,
+          bodyColor: tooltipText,
+          borderColor: tooltipBorder,
+          borderWidth: 1,
+          cornerRadius: 10,
+          padding: 12,
+          displayColors: true,
+          usePointStyle: true,
+          titleFont: { size: 12, weight: '700' },
+          bodyFont: { size: 12 },
+          callbacks: {
+            label(item){
+              if(item.parsed.y === null || item.parsed.y === undefined){ return null; }
+              return ` ${item.dataset.label}：${Number(item.parsed.y).toFixed(3)}`;
+            },
+            afterTitle(items){
+              const z = items && items.length ? zones[items[0].dataIndex] : null;
+              return z ? `区间：${z}` : '';
+            },
+          },
+        },
         zoneBackground: {},
       },
       scales: {
         x: {
-          title: { display: true, text: 'Date' },
+          title: { display: true, text: '日期', color: titleColor, font: { size: 12, weight: '600' } },
           max: labels.length - 1,
+          grid: { color: gridColor, drawTicks: false },
+          border: { color: gridColor },
+          ticks: { color: axisColor, maxTicksLimit: 10, autoSkip: true, maxRotation: 0, padding: 8, font: { size: 11 } },
         },
         y: {
-          title: { display: true, text: 'Price' },
+          title: { display: true, text: '价格', color: titleColor, font: { size: 12, weight: '600' } },
+          grid: { color: gridColor, drawTicks: false },
+          border: { display: false },
+          ticks: { color: axisColor, padding: 10, font: { size: 11 } },
         },
       },
     },
