@@ -378,33 +378,33 @@ def _history_cache_path(symbol: str, source: str, days: int, price_scale: float 
     safe_symbol = _safe_symbol_for_file(symbol)
     safe_source = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(source or "unknown"))
     scale_text = str(price_scale).replace(".", "p")
-    return HISTORY_CACHE_DIR / f"{safe_symbol}_{safe_source}_{int(days)}_{scale_text}_{_cache_day()}.json"
+    return HISTORY_CACHE_DIR / f"{safe_symbol}_{safe_source}_{int(days)}_{scale_text}_v3_{_cache_day()}.json"
 
 
-def _df_from_history_cache(path: Path, days: int) -> pd.DataFrame | None:
+def _df_from_history_cache(path: Path, days: int) -> tuple[pd.DataFrame | None, str]:
     try:
         if not path.exists():
-            return None
+            return None, ""
         data = json.loads(path.read_text(encoding="utf-8") or "{}")
         rows = data.get("rows")
         if not isinstance(rows, list) or not rows:
-            return None
+            return None, ""
         df = pd.DataFrame(rows)
         required = {"date", "raw_close", "adj_close", "dividend", "split_ratio"}
         if not required.issubset(set(df.columns)):
-            return None
+            return None, ""
         for col in ["raw_close", "adj_close", "dividend", "split_ratio"]:
             df[col] = pd.to_numeric(df[col], errors="coerce")
         df = df.dropna(subset=["raw_close", "adj_close"]).copy()
         df = df[(df["raw_close"] > 0) & (df["adj_close"] > 0)].copy()
         if len(df) < 10:
-            return None
-        return df.tail(days).reset_index(drop=True)
+            return None, ""
+        return df.tail(days).reset_index(drop=True), str(data.get("corporate_action_status") or "")
     except Exception:
-        return None
+        return None, ""
 
 
-def _save_history_cache(path: Path, symbol: str, source: str, df: pd.DataFrame) -> None:
+def _save_history_cache(path: Path, symbol: str, source: str, df: pd.DataFrame, status: str = "") -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         required = ["date", "raw_close", "adj_close", "dividend", "split_ratio"]
@@ -413,6 +413,7 @@ def _save_history_cache(path: Path, symbol: str, source: str, df: pd.DataFrame) 
             "cache_day": _cache_day(),
             "symbol": str(symbol or "").upper().strip(),
             "source": str(source or ""),
+            "corporate_action_status": str(status or ""),
             "written_at": datetime.now().isoformat(timespec="seconds"),
             "rows": rows,
         }
@@ -425,15 +426,96 @@ def _save_history_cache(path: Path, symbol: str, source: str, df: pd.DataFrame) 
 
 # 市场数据
 # ===========================
+CORPORATE_ACTION_REFERENCE = {
+    "historical_a1": "historical_a3",
+    "historical_a2": "historical_a3",
+    "historical_hk1": "historical_hk3",
+    "historical_hk2": "historical_hk3",
+}
+
+_LAST_CORPORATE_ACTION_STATUS = "unknown"
+
+
+def _fetch_corporate_action_reference(symbol: str, ref_source: str, days: int):
+    import market_data as _market_data
+    if ref_source == "historical_hk3":
+        return _market_data._parse_yahoo_hk_dividend_snapshot(symbol, days, 1.0)
+    return _market_data._fetch_baostock_a_snapshot(symbol, days, 1.0)
+
+
+def _enrich_corporate_actions(symbol: str, source: str, days: int, out: pd.DataFrame) -> pd.DataFrame:
+    global _LAST_CORPORATE_ACTION_STATUS
+    if source in ("historical_a3", "historical_hk3"):
+        _LAST_CORPORATE_ACTION_STATUS = f"native:{source}"
+        return out
+    ref_source = CORPORATE_ACTION_REFERENCE.get(source)
+    if not ref_source:
+        _LAST_CORPORATE_ACTION_STATUS = f"unsupported:{source}"
+        return out
+    try:
+        ref = _fetch_corporate_action_reference(symbol, ref_source, max(int(days), 2))
+        ref_dates = [str(d) for d in (ref.dates or [])]
+        ref_div = list(getattr(ref, "dividends", None) or [])
+        ref_split = list(getattr(ref, "split_ratios", None) or [])
+        if not ref_dates or len(ref_div) != len(ref_dates):
+            _LAST_CORPORATE_ACTION_STATUS = f"no_data:{ref_source}"
+            logging.warning(f"回测除权息补齐无数据: {symbol} {source} <- {ref_source}")
+            return out
+        out_dates = [str(d) for d in out["date"].tolist()]
+        out_index = {d: i for i, d in enumerate(out_dates)}
+
+        def _align(d: str) -> str | None:
+            if d in out_index:
+                return d
+            for od in out_dates:
+                if od >= d:
+                    return od
+            return None
+
+        div_map: dict[str, float] = {}
+        for d, v in zip(ref_dates, ref_div):
+            amount = _safe_float(v, 0.0)
+            if amount <= 0:
+                continue
+            aligned = _align(d)
+            if aligned:
+                div_map[aligned] = div_map.get(aligned, 0.0) + amount
+        out["dividend"] = pd.Series(out_dates).map(lambda d: div_map.get(d, 0.0)).astype(float).values
+
+        if len(ref_split) == len(ref_dates):
+            split_map: dict[str, float] = {}
+            for d, v in zip(ref_dates, ref_split):
+                ratio = _safe_float(v, 1.0) or 1.0
+                if ratio == 1.0:
+                    continue
+                aligned = _align(d)
+                if aligned:
+                    split_map[aligned] = split_map.get(aligned, 1.0) * ratio
+            out["split_ratio"] = pd.Series(out_dates).map(lambda d: split_map.get(d, 1.0)).astype(float).values
+
+        total = float(out["dividend"].sum())
+        events = int((out["dividend"] > 0).sum())
+        _LAST_CORPORATE_ACTION_STATUS = (f"ok:{ref_source}" if events > 0 else f"empty:{ref_source}")
+        logging.info(f"回测除权息补齐: {symbol} {source} <- {ref_source}, dividend_sum={total:.6f}, events={events}")
+    except Exception as e:
+        _LAST_CORPORATE_ACTION_STATUS = f"failed:{ref_source}"
+        logging.warning(f"回测除权息补齐失败 {symbol} {source} <- {ref_source}: {e}")
+    return out
+
+
 def fetch_market_data(symbol: str, days: int) -> pd.DataFrame:
+    global _LAST_CORPORATE_ACTION_STATUS
     source = get_backtest_source_for_symbol(symbol)
     if source and source != "yfinance":
         try:
             cache_path = _history_cache_path(symbol, source, days, 1.0)
-            cached_df = _df_from_history_cache(cache_path, days)
-            if cached_df is not None and len(cached_df) >= 10:
-                logging.info(f"回测数据源缓存: {symbol} -> {source}, count={len(cached_df)}")
+            cached_df, cached_status = _df_from_history_cache(cache_path, days)
+            if cached_df is not None and len(cached_df) >= 10 and cached_status and not cached_status.startswith(("failed", "no_data")):
+                _LAST_CORPORATE_ACTION_STATUS = f"cached({cached_status})"
+                logging.info(f"回测数据源缓存: {symbol} -> {source}, count={len(cached_df)}, dividend_sum={float(cached_df['dividend'].sum()):.6f}, status={cached_status}")
                 return cached_df
+            if cached_df is not None:
+                logging.info(f"回测数据源缓存忽略: {symbol} -> {source}, status={cached_status or 'unknown'}，重新拉取以补齐除权息")
             import market_data as _market_data
             snap = _market_data.get_history_snapshot_by_source(symbol, days=days, price_scale=1.0, source=source)
             closes = list(snap.closes or [])[-days:]
@@ -471,13 +553,15 @@ def fetch_market_data(symbol: str, days: int) -> pd.DataFrame:
             out = out[(out["raw_close"] > 0) & (out["adj_close"] > 0)].tail(days).reset_index(drop=True)
             if len(out) < 10:
                 raise RuntimeError(f"历史数据太少：{symbol} source={source} 仅 {len(out)} 条")
+            out = _enrich_corporate_actions(symbol, source, days, out)
             logging.info(f"回测数据源: {symbol} -> {source}, count={len(out)}")
-            _save_history_cache(cache_path, symbol, source, out)
+            _save_history_cache(cache_path, symbol, source, out, _LAST_CORPORATE_ACTION_STATUS)
             return out
         except Exception as e:
             raise RuntimeError(f"回测数据源 {source} 获取失败: {symbol}: {e}")
 
     yahoo_symbol = to_yahoo_symbol(symbol)
+    _LAST_CORPORATE_ACTION_STATUS = "native:yfinance"
     end_dt = datetime.now()
     start_dt = end_dt - timedelta(days=max(days * 3, 1200))
     ticker = yf.Ticker(yahoo_symbol)
@@ -597,10 +681,14 @@ def backtest(symbol: str, name: str, cfg: dict, strategy: dict, days: int, outdi
 
     units = initial_units
 
-    initial_avg_cost = raw_all[0]
+    initial_avg_cost_cfg = _safe_float(cfg.get("initial_avg_cost", 0.0), 0.0)
+    initial_avg_cost = initial_avg_cost_cfg if initial_avg_cost_cfg > 0 else raw_all[0]
+    initial_avg_cost_source = "config" if initial_avg_cost_cfg > 0 else "window_first_close"
     avg_cost = initial_avg_cost if units > POSITION_EPSILON else 0.0
     initial_stock_units = units
     initial_stock_return_base = (initial_stock_units * avg_cost) if position_mode == "absolute" else initial_stock_units
+    net_invested = initial_stock_return_base
+    peak_invested = initial_stock_return_base
     last_trade_price = raw_all[0]
     last_trade_side = "buy"
     pyramid_add_step = 0
@@ -683,7 +771,7 @@ def backtest(symbol: str, name: str, cfg: dict, strategy: dict, days: int, outdi
 
     def _exec_buy(dt, trade_price, qty, zone, reason, raw_close, adj_close,
                   ma150_val, dividend, split_ratio):
-        nonlocal cash, units, avg_cost, last_trade_price, last_trade_side, first_trade_date, first_trade_raw_price, first_trade_adj_price, total_buy_qty_raw, total_buy_cost
+        nonlocal cash, units, avg_cost, last_trade_price, last_trade_side, first_trade_date, first_trade_raw_price, first_trade_adj_price, total_buy_qty_raw, total_buy_cost, net_invested, peak_invested
         qty = normalize_position_amount(qty, position_mode, lot_size)
         if qty <= POSITION_EPSILON:
             return
@@ -692,6 +780,9 @@ def backtest(symbol: str, name: str, cfg: dict, strategy: dict, days: int, outdi
         cash -= (px * qty + fee) if position_mode == "absolute" else (qty + fee)
         total_buy_qty_raw += qty
         total_buy_cost += (px * qty) if position_mode == "absolute" else qty
+        net_invested += (px * qty) if position_mode == "absolute" else qty
+        if net_invested > peak_invested:
+            peak_invested = net_invested
         avg_cost = calculate_new_avg_cost(units, avg_cost, qty, px)
         if first_trade_date is None:
             first_trade_date = dt
@@ -718,7 +809,7 @@ def backtest(symbol: str, name: str, cfg: dict, strategy: dict, days: int, outdi
 
     def _exec_sell(dt, trade_price, qty, zone, reason, raw_close, adj_close,
                    ma150_val, dividend, split_ratio):
-        nonlocal cash, units, avg_cost, last_trade_price, last_trade_side, realized_pnl, dilution_credit, first_trade_date, first_trade_raw_price, first_trade_adj_price, total_sell_qty_raw
+        nonlocal cash, units, avg_cost, last_trade_price, last_trade_side, realized_pnl, dilution_credit, first_trade_date, first_trade_raw_price, first_trade_adj_price, total_sell_qty_raw, net_invested
         if units <= POSITION_EPSILON:
             return
         qty = min(_safe_float(qty, 0.0), units)
@@ -747,11 +838,13 @@ def backtest(symbol: str, name: str, cfg: dict, strategy: dict, days: int, outdi
                 trade_realized_pnl = qty * (px / avg_cost_before - 1.0)
         realized_pnl += trade_realized_pnl
         dilution_credit += trade_realized_pnl
+        cost_released = (avg_cost_before * qty) if position_mode == "absolute" else qty
+        net_invested = max(net_invested - cost_released, 0.0)
         units = normalize_position_amount(max(units - qty, 0.0), position_mode, lot_size)
         if units <= POSITION_EPSILON:
             units = 0.0
             avg_cost = 0.0
-            dilution_credit = 0.0
+            net_invested = 0.0
         last_trade_before = last_trade_price
         last_add_before = last_add_price
         last_trade_price = px
@@ -1035,14 +1128,11 @@ def backtest(symbol: str, name: str, cfg: dict, strategy: dict, days: int, outdi
             elif row["event_type"] == "SPLIT":
                 split_events += 1
 
-    if position_mode == "absolute":
-        stock_return_base = initial_stock_return_base + total_buy_cost
-        if stock_return_base <= POSITION_EPSILON and units > POSITION_EPSILON and avg_cost > 0:
-            stock_return_base = units * avg_cost
-    else:
-        stock_return_base = initial_stock_return_base + total_buy_qty_raw
-        if stock_return_base <= POSITION_EPSILON and units > POSITION_EPSILON:
-            stock_return_base = units
+    stock_return_base = peak_invested
+    if stock_return_base <= POSITION_EPSILON and units > POSITION_EPSILON:
+        stock_return_base = (units * avg_cost) if position_mode == "absolute" else units
+    if stock_return_base <= POSITION_EPSILON:
+        stock_return_base = initial_stock_return_base + (total_buy_cost if position_mode == "absolute" else total_buy_qty_raw)
     if stock_return_base <= POSITION_EPSILON:
         stock_return_base = 1.0
 
@@ -1073,8 +1163,14 @@ def backtest(symbol: str, name: str, cfg: dict, strategy: dict, days: int, outdi
                 diluted_cost_fully_recovered = True
 
     final_holding_return_note = ""
+    if units > POSITION_EPSILON and raw_backtest_avg_cost > POSITION_EPSILON:
+        final_holding_return_rate = raw_all[-1] / raw_backtest_avg_cost - 1.0
+    else:
+        final_holding_return_rate = 0.0
+
+    diluted_holding_return_rate = 0.0
     if units > POSITION_EPSILON and diluted_backtest_avg_cost > POSITION_EPSILON:
-        final_holding_return_rate = raw_all[-1] / diluted_backtest_avg_cost - 1.0
+        diluted_holding_return_rate = raw_all[-1] / diluted_backtest_avg_cost - 1.0
     elif units > POSITION_EPSILON and diluted_cost_fully_recovered:
         if position_mode == "absolute":
             original_holding_cost = units * raw_backtest_avg_cost
@@ -1083,13 +1179,10 @@ def backtest(symbol: str, name: str, cfg: dict, strategy: dict, days: int, outdi
             original_holding_cost = units
             ending_market_value = final_market_weight
         if original_holding_cost > POSITION_EPSILON:
-            final_holding_return_rate = (ending_market_value + dilution_profit_contribution - original_holding_cost) / original_holding_cost
-            final_holding_return_note = "摊薄成本已降至0，期末持仓收益率按(期末市值+分红/已实现收益贡献-原始持仓成本)/原始持仓成本计算"
+            diluted_holding_return_rate = (ending_market_value + dilution_profit_contribution - original_holding_cost) / original_holding_cost
+            final_holding_return_note = "摊薄成本已降至0，摊薄持仓收益率按(期末市值+分红/已实现收益贡献-原始持仓成本)/原始持仓成本计算"
         else:
-            final_holding_return_rate = 0.0
-            final_holding_return_note = "摊薄成本已降至0，但原始持仓成本为0，无法计算期末持仓收益率"
-    else:
-        final_holding_return_rate = 0.0
+            final_holding_return_note = "摊薄成本已降至0，但原始持仓成本为0，无法计算摊薄持仓收益率"
 
     dividend_stock_return = (dividend_total / stock_return_base) if stock_return_base > POSITION_EPSILON else 0.0
     realized_stock_return = (realized_pnl / stock_return_base) if stock_return_base > POSITION_EPSILON else 0.0
@@ -1120,6 +1213,7 @@ def backtest(symbol: str, name: str, cfg: dict, strategy: dict, days: int, outdi
         "floating_pnl": floating_pnl,
         "holding_stock_return": holding_stock_return,
         "final_holding_return_rate": final_holding_return_rate,
+        "diluted_holding_return_rate": diluted_holding_return_rate,
         "final_holding_return_note": final_holding_return_note,
         "diluted_cost_fully_recovered": diluted_cost_fully_recovered,
         "dividend_total": dividend_total,
@@ -1127,7 +1221,12 @@ def backtest(symbol: str, name: str, cfg: dict, strategy: dict, days: int, outdi
         "realized_stock_return": realized_stock_return,
         "stock_total_return": stock_total_return,
         "stock_return_base": stock_return_base,
+        "stock_return_base_mode": "peak_net_invested",
+        "net_invested": net_invested,
+        "peak_invested": peak_invested,
         "initial_stock_return_base": initial_stock_return_base,
+        "initial_avg_cost": initial_avg_cost,
+        "initial_avg_cost_source": initial_avg_cost_source,
         "dilution_credit": dilution_credit,
         "additional_buy_return_base": total_buy_cost if position_mode == "absolute" else total_buy_qty_raw,
         "stock_return_explain": stock_return_explain,
@@ -1136,6 +1235,7 @@ def backtest(symbol: str, name: str, cfg: dict, strategy: dict, days: int, outdi
         "buy_trades": buy_cnt,
         "sell_trades": sell_cnt,
         "dividend_events": dividend_events,
+        "corporate_action_status": _LAST_CORPORATE_ACTION_STATUS,
         "split_events": split_events,
         "total_fee": 0.0,
         "final_cash": cash,
@@ -1174,6 +1274,7 @@ def backtest(symbol: str, name: str, cfg: dict, strategy: dict, days: int, outdi
         rf.write(f"运行结束时倒金字塔加仓开关: {summary['runtime_pyramid_add_final']}\n")
         rf.write(f"运行结束时倒金字塔卖出开关: {summary['runtime_pyramid_sell_final']}\n")
         rf.write(f"期末持仓收益率: {summary['final_holding_return_rate'] * 100:.2f}%\n")
+        rf.write(f"摊薄持仓收益率: {summary['diluted_holding_return_rate'] * 100:.2f}%\n")
         rf.write(f"综合收益率: {summary['stock_total_return'] * 100:.2f}%\n")
         rf.write(f"买入次数: {summary['buy_trades']}\n")
         rf.write(f"卖出次数: {summary['sell_trades']}\n")
@@ -1183,12 +1284,12 @@ def backtest(symbol: str, name: str, cfg: dict, strategy: dict, days: int, outdi
         rf.write("综合收益率说明: 综合收益率 = 分红收益率 + 交易实现收益率 + 持仓收益率\n")
         rf.write(f"综合收益率计算: {summary['stock_return_explain']}\n")
         if summary['position_mode'] == 'percent':
-            rf.write(f"累计投入仓位: {format_percent_ratio(summary['stock_return_base'])}\n")
+            rf.write(f"峰值净投入仓位: {format_percent_ratio(summary['stock_return_base'])}\n")
             rf.write(f"收益贡献: {format_percent_ratio(summary['dilution_credit'])}\n")
             if summary.get('diluted_cost_fully_recovered'):
                 rf.write(f"摊薄成本状态: {summary.get('final_holding_return_note', '摊薄成本已降至0，已按当前持仓最终收益口径计算')}\n")
         else:
-            rf.write(f"累计投入金额: {summary['stock_return_base']:.4f}\n")
+            rf.write(f"峰值净投入金额: {summary['stock_return_base']:.4f}\n")
             rf.write(f"收益贡献金额: {summary['dilution_credit']:.4f}\n")
             if summary.get('diluted_cost_fully_recovered'):
                 rf.write(f"摊薄成本状态: {summary.get('final_holding_return_note', '摊薄成本已降至0，已按当前持仓最终收益口径计算')}\n")
@@ -1198,6 +1299,7 @@ def backtest(symbol: str, name: str, cfg: dict, strategy: dict, days: int, outdi
             rf.write(f"首次建仓复权价: {summary['first_trade_adj_price']:.4f}\n")
             rf.write(f"首次建仓日: {summary['first_trade_date']}\n")
         rf.write(f"分红事件: {summary['dividend_events']}\n")
+        rf.write(f"除权息数据来源: {summary.get('corporate_action_status', 'unknown')}\n")
         rf.write(f"拆股事件: {summary['split_events']}\n")
         rf.write(f"最大回撤: {summary['max_drawdown_ref'] * 100:.2f}%\n")
         if summary['position_mode'] == 'percent':
@@ -1318,6 +1420,7 @@ def main():
     print(f"MA预热: {summary.get('ma_warmup_available', 0)}/{summary.get('ma_warmup_required', 150)}根")
     print(f"回测初始仓位: {format_units_for_display(summary['initial_units'], summary['position_mode'])}")
     print(f"期末持仓收益率: {summary['final_holding_return_rate'] * 100:.2f}%")
+    print(f"摊薄持仓收益率: {summary['diluted_holding_return_rate'] * 100:.2f}%")
     print(f"综合收益率: {summary['stock_total_return'] * 100:.2f}%")
     print(f"买入次数: {summary['buy_trades']}")
     print(f"卖出次数: {summary['sell_trades']}")
@@ -1327,12 +1430,12 @@ def main():
     print("综合收益率说明: 综合收益率 = 分红收益率 + 交易实现收益率 + 持仓收益率")
     print(f"综合收益率计算: {summary['stock_return_explain']}")
     if summary['position_mode'] == 'percent':
-        print(f"累计投入仓位: {format_percent_ratio(summary['stock_return_base'])}")
+        print(f"峰值净投入仓位: {format_percent_ratio(summary['stock_return_base'])}")
         print(f"收益贡献: {format_percent_ratio(summary['dilution_credit'])}")
         if summary.get('diluted_cost_fully_recovered'):
             print(f"摊薄成本状态: {summary.get('final_holding_return_note', '摊薄成本已降至0，已按当前持仓最终收益口径计算')}")
     else:
-        print(f"累计投入金额: {summary['stock_return_base']:.4f}")
+        print(f"峰值净投入金额: {summary['stock_return_base']:.4f}")
         print(f"收益贡献金额: {summary['dilution_credit']:.4f}")
         if summary.get('diluted_cost_fully_recovered'):
             print(f"摊薄成本状态: {summary.get('final_holding_return_note', '摊薄成本已降至0，已按当前持仓最终收益口径计算')}")
@@ -1342,6 +1445,7 @@ def main():
         print(f"首次建仓复权价: {summary['first_trade_adj_price']:.4f}")
         print(f"首次建仓日: {summary['first_trade_date']}")
     print(f"分红事件: {summary['dividend_events']}")
+    print(f"除权息数据来源: {summary.get('corporate_action_status', 'unknown')}")
     print(f"拆股事件: {summary['split_events']}")
     print(f"最大回撤: {summary['max_drawdown_ref'] * 100:.2f}%")
 
@@ -1372,9 +1476,11 @@ def main():
     print("3) 倒金字塔加仓：历史回测每次从 pyramid_add_enabled=auto 起步，忽略 quant.yaml 中实盘 yes；首次进入 CHANCE_ZONE 后才切到 yes。")
     print("4) 箱体区规则：回测起步在 BOX_ZONE 时不会因实盘 yes 直接补仓；只有已由 CHANCE_ZONE 激活的倒金字塔模式，才可在 CHANCE/BOX 中继续按步长加仓。")
     print("5) 卖出规则：TREND_ZONE 只卖出高于长期底仓 base_units 的机动仓；CLEAR_ZONE 按倒金字塔卖出（首次进入 CLEAR 自动激活，跌回 BOX/CHANCE 重置）。")
-    print("6) 回测成本：回测页面的初始仓位只代表第一交易日 current_units，成本使用回测窗口第一天 Close；current_avg_cost 仅用于实盘监控。")
-    print("7) 收益口径：期末持仓收益率=最新价格/摊薄后持仓成本-1；综合收益率按累计投入计算。")
-    print("8) 百分比模式下 qty 表示仓位比例；交易日志保留上一次成交价和上一次加仓价。")
+    print("6) 回测成本：回测页面的初始仓位只代表第一交易日 current_units，成本默认使用回测窗口第一天 Close，可用配置 initial_avg_cost 指定真实建仓成本；current_avg_cost 仅用于实盘监控。")
+    print("7) 收益口径：峰值净投入=回测期内已买入未卖出仓位的历史最高值（买入增加、卖出按当时成本冲减、清仓归零）。分红收益率/交易实现收益率/持仓收益率均以它为分母，三者互不重叠，相加即综合收益率。")
+    print("8) 期末持仓收益率=最新价格/原始持仓成本-1（不扣分红和已实现收益）；摊薄持仓收益率把全周期分红和已实现收益摊回成本，仅参考，不计入综合收益率；所有收益率不扣手续费。")
+    print("9) 除权息数据：腾讯/新浪日K源不带分红拆股，回测会自动从 BaoStock A股含权息 / Yahoo港股含权息 补齐，见报告中的“除权息数据来源”。")
+    print("10) 百分比模式下 qty 表示仓位比例；交易日志保留上一次成交价和上一次加仓价。")
     print("=========================================\n")
 
 
