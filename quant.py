@@ -590,15 +590,11 @@ def load_state():
                     state[name] = normalize_symbol_state(name, cfg, state[name])
             if "_meta" not in state:
                 state["_meta"] = {
-                    "last_daily_push_date": strategy_now().date().isoformat(),
-                    "last_log_rotate_date": strategy_now().date().isoformat()
+                    "last_daily_push_date": None,
+                    "last_log_rotate_date": None
                 }
-            else:
-                # 确保两个字段存在（旧状态兼容）
-                if "last_log_rotate_date" not in state["_meta"]:
-                    state["_meta"]["last_log_rotate_date"] = strategy_now().date().isoformat()
-                if "last_daily_push_date" not in state["_meta"]:
-                    state["_meta"]["last_daily_push_date"] = strategy_now().date().isoformat()
+            elif "last_log_rotate_date" not in state["_meta"]:
+                state["_meta"]["last_log_rotate_date"] = None
             return state
         except Exception as e:
             logging.error(f"加载状态文件失败: {e}")
@@ -606,10 +602,9 @@ def load_state():
     initial_state = {}
     for name, cfg in SYMBOL_CONFIG.items():
         initial_state[name] = build_default_symbol_state(cfg)
-    today = strategy_now().date().isoformat()
     initial_state["_meta"] = {
-        "last_daily_push_date": today,
-        "last_log_rotate_date": today
+        "last_daily_push_date": None,
+        "last_log_rotate_date": None
     }
     return initial_state
 
@@ -3021,10 +3016,10 @@ def main_loop():
     state = load_state()
     # load_state() 已确保 _meta 中有 last_daily_push_date 和 last_log_rotate_date
     if "_meta" not in state:
-        today = strategy_now().date().isoformat()
+        yesterday = (strategy_now().date() - timedelta(days=1)).isoformat()
         state["_meta"] = {
-            "last_daily_push_date": today,
-            "last_log_rotate_date": today,
+            "last_daily_push_date": None,
+            "last_log_rotate_date": None,
         }
     last_config_reload_seq = _safe_int(state.get("_meta", {}).get("config_reload_seq", 0), 0)
     last_system_config_seq = _safe_int(state.get("_meta", {}).get("system_config_seq", 0), 0)
@@ -3046,68 +3041,41 @@ def main_loop():
             logging.info("=" * 60)
             logging.info(f"🔄 开始执行日志轮转 - {now.strftime('%Y-%m-%d %H:%M:%S')}")
             logging.info("=" * 60)
-            rotate_and_backup_logs(now)
-            log_dir = os.path.join(BASE_DIR, "log")
-            try:
-                clean_old_quant_logs(log_dir=log_dir, keep=7)
-            except Exception as e:
-                logging.exception(f"❌ 执行日志清理函数失败: {e}")
-            try:
-                prune_strategy_history_cache()
-                logging.info("🧹 已清理旧策略缓存文件（仅保留今日）")
-            except Exception as e:
-                logging.exception(f"❌ 清理策略缓存失败: {e}")
-
-            # 保存日志轮转状态（重试机制）
-            today_str = now.date().isoformat()
-            meta = state.setdefault("_meta", {})
-            meta["last_log_rotate_date"] = today_str
-            try:
-                save_state(state)
-                logging.info("✅ 日志轮转状态已保存")
-            except Exception as e:
-                logging.error(f"❌ 保存日志轮转状态失败: {e}，将在下一轮重试")
-                # 不中断流程，继续执行其他操作
-            logging.info("=" * 60)
-            logging.info("✅ 日志轮转完成")
-            logging.info("=" * 60)
-
-        # 每日快照推送（独立于日志轮转）
-        if should_do_daily_push(state, now):
-            snapshot = build_daily_snapshot(state)
-            logging.info("=" * 60)
-            logging.info("📌每日快照内容:")
-            logging.info("=" * 60)
-            logging.info(snapshot)
-            logging.info("=" * 60)
-
-            snapshot_sent = False
-            try:
-                snapshot_sent = send_notification(snapshot, title="每日快照")
-                if snapshot_sent:
-                    logging.info("✅ 每日快照推送成功")
-                else:
-                    logging.error("❌ 每日快照推送失败（返回 False）")
-            except Exception as e:
-                logging.error(f"❌ 推送每日快照异常: {e}")
-
-            # 只有推送成功才更新状态，防止重复推送
-            if snapshot_sent:
-                today_str = now.date().isoformat()
-                meta = state.setdefault("_meta", {})
-                meta["last_daily_push_date"] = today_str
+            rotate_success = rotate_and_backup_logs(now)
+            if rotate_success:
+                log_dir = os.path.join(BASE_DIR, "log")
                 try:
-                    save_state(state)
-                    logging.info("✅ 每日快照推送状态已保存")
+                    clean_old_quant_logs(log_dir=log_dir, keep=7)
                 except Exception as e:
-                    logging.error(f"❌ 保存快照推送状态失败: {e}，下一轮将重新推送")
-            else:
-                logging.warning("⚠️ 快照推送失败，将在下一轮重新尝试")
+                    logging.exception(f"❌ 执行日志清理函数失败: {e}")
 
-        # 策略运行总开关（STRATEGY.loop_enabled）
-        if str(STRATEGY.get("loop_enabled", "yes") or "yes").strip().lower() not in ("yes", "1", "true", "on"):
-            sleep_until_next_loop_or_web_request(state, STRATEGY.get("loop_interval", 60))
-            continue
+                # 清理非当日的策略缓存文件（全局）
+                try:
+                    prune_strategy_history_cache()
+                    logging.info("🧹 已清理旧策略缓存文件（仅保留今日）")
+                except Exception as e:
+                    logging.exception(f"❌ 清理策略缓存失败: {e}")
+
+                snapshot = build_daily_snapshot(state)
+                logging.info("=" * 60)
+                logging.info("📌每日快照内容:")
+                logging.info("=" * 60)
+                logging.info(snapshot)
+                logging.info("=" * 60)
+                try:
+                    send_notification(snapshot, title="每日快照")
+                    logging.info("✅ 每日快照推送成功")
+                except Exception as e:
+                    logging.error(f"❌ 推送每日快照失败: {e}")
+
+                state["_meta"]["last_log_rotate_date"] = now.date().isoformat()
+                state["_meta"]["last_daily_push_date"] = now.date().isoformat()
+                save_state(state)
+
+                logging.info("=" * 60)
+                logging.info("✅ 日志轮转与快照推送完成")
+                logging.info("🕒 下次轮转时间: 明天 08:00")
+                logging.info("=" * 60)
 
         # 非交易时段：严格按配置的交易时段工作。
         # Web 手动状态刷新 / 指标刷新在盘外只登记为已跳过，不生成状态文本、不拉实时行情、不写策略快照。
