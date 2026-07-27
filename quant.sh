@@ -657,8 +657,8 @@ cron_check() {
 setup_systemd_service() {
     local service_file=”/etc/systemd/system/quant.service”
 
-    if [ ! -x “$VENV_DIR/bin/python” ]; then
-        echo “❌ 未检测到虚拟环境 $VENV_DIR，请先执行菜单 1 下载/更新项目与依赖。”
+    if [ ! -d “$VENV_DIR” ]; then
+        echo “❌ 虚拟环境不存在，请先执行菜单 1。”
         return 1
     fi
 
@@ -700,12 +700,13 @@ start_quant() {
         setup_systemd_service || return 1
     fi
 
-    echo “启动 quant.py (via systemd)...”
+    echo “启动 quant.py [via systemd]...”
     ${SUDO} systemctl start quant.service
     sleep 2
 
     if ${SUDO} systemctl is-active --quiet quant.service; then
-        local PID=$(${SUDO} systemctl show quant.service -p MainPID --value 2>/dev/null)
+        local PID
+        PID=$(${SUDO} systemctl show quant.service -p MainPID --value 2>/dev/null)
         echo “✅ quant.py 已启动，PID=$PID”
         return 0
     else
@@ -762,10 +763,14 @@ show_status() {
     ensure_quant_dir
     echo -e "${C_CYAN}========== 服务运行状态 ==========${C_RESET}"
 
-    # quant.py 状态（via systemd）
+    # quant.py 状态（检查进程和 systemd）
+    local PROC_PID=$(pgrep -f "python.*quant.py" | head -1)
     if ${SUDO} systemctl is-active --quiet quant.service 2>/dev/null; then
         PID=$(${SUDO} systemctl show quant.service -p MainPID --value 2>/dev/null)
         echo -e "Quant.py:      ${C_GREEN}✅ active (running)${C_RESET} (PID=$PID)"
+    elif [ -n "$PROC_PID" ]; then
+        echo -e "Quant.py:      ${C_GREEN}✅ running (orphan)${C_RESET} (PID=$PROC_PID)"
+        echo -e "${C_YELLOW}  提示: systemd 未追踪此进程，建议执行菜单 2 重启${C_RESET}"
     else
         echo -e "Quant.py:      ${C_RED}❌ inactive${C_RESET}"
     fi
@@ -1068,7 +1073,33 @@ restart_all_services() {
     # 创建 systemd service（如不存在）
     if [ ! -f "/etc/systemd/system/quant.service" ]; then
         echo "创建 systemd service..."
-        setup_systemd_service || return 1
+        local py_bin="python3"
+        local py_path="$PYTHON_CMD"
+        if [ -x "$VENV_DIR/bin/python" ]; then
+            py_bin="$VENV_DIR/bin/python"
+        fi
+
+        ${SUDO} tee "/etc/systemd/system/quant.service" >/dev/null <<SERVICE
+[Unit]
+Description=Quant Grid Trading Monitor
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=$DCF_DIR
+Environment=PYTHONUNBUFFERED=1
+ExecStart=$py_bin $PY_SCRIPT
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+
+        ${SUDO} systemctl daemon-reload
+        ${SUDO} systemctl enable quant.service
+        echo "✅ systemd service 已创建并启用"
     fi
 
     # 停止服务
