@@ -619,14 +619,13 @@ PY
 }
 
 add_cron_watchdog() {
-    local cron_line="*/5 * * * * bash $SCRIPT_DIR/quant.sh --cron-check >/dev/null 2>&1"
-    (crontab -l 2>/dev/null | grep -v "quant.sh --cron-check" || true; echo "$cron_line") | crontab -
-    echo "已在 crontab 中添加每5分钟检查任务。"
+    # 已弃用：systemd service 的 Restart=always 负责自动重启
+    return 0
 }
 
 remove_cron_watchdog() {
-    (crontab -l 2>/dev/null | grep -v "quant.sh --cron-check" || true) | crontab - 2>/dev/null || true
-    echo "已从 crontab 中移除检查任务（如存在）。"
+    # 已弃用：systemd service 替代 cron 看门狗
+    return 0
 }
 
 cron_check() {
@@ -655,71 +654,100 @@ cron_check() {
     echo "$(date '+%Y.%m.%d.%H:%M:%S') [cron-check] 已重新启动 quant.py，PID=$NEW_PID" >> "$LOG_FILE"
 }
 
-start_quant() {
-    ensure_quant_dir
+setup_systemd_service() {
+    local service_file=”/etc/systemd/system/quant.service”
 
-    if [ ! -f "$PY_SCRIPT" ]; then
-        echo "找不到 $PY_SCRIPT，请先执行菜单 1 下载/更新项目与依赖。"
+    if [ ! -x “$VENV_DIR/bin/python” ]; then
+        echo “❌ 未检测到虚拟环境 $VENV_DIR，请先执行菜单 1 下载/更新项目与依赖。”
         return 1
     fi
 
-    if [ -f "$PID_FILE" ]; then
-        local PID
-        PID=$(cat "$PID_FILE" 2>/dev/null || echo "")
-        if [ -n "${PID}" ] && ps -p "$PID" >/dev/null 2>&1; then
-            echo "quant.py 已在运行中（PID=$PID），如需重启请先选择“停止脚本”。"
-            return 0
-        else
-            rm -f "$PID_FILE"
-        fi
+    echo “创建 systemd service 文件...”
+    ${SUDO} tee “$service_file” >/dev/null <<SERVICE
+[Unit]
+Description=Quant Grid Trading Monitor
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=$DCF_DIR
+Environment=PYTHONUNBUFFERED=1
+ExecStart=$VENV_DIR/bin/python $PY_SCRIPT
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+
+    ${SUDO} systemctl daemon-reload
+    ${SUDO} systemctl enable quant.service
+    echo “✅ systemd service 已创建并启用”
+}
+
+start_quant() {
+    ensure_quant_dir
+
+    if [ ! -f “$PY_SCRIPT” ]; then
+        echo “找不到 $PY_SCRIPT，请先执行菜单 1 下载/更新项目与依赖。”
+        return 1
     fi
 
-    echo "启动 quant.py ..."
-    echo "日志文件：$LOG_FILE"
+    # 使用 systemd service 启动
+    if [ ! -f “/etc/systemd/system/quant.service” ]; then
+        echo “systemd service 未安装，正在创建...”
+        setup_systemd_service || return 1
+    fi
 
-    if [ -x "$VENV_DIR/bin/python" ]; then
-        nohup "$VENV_DIR/bin/python" "$PY_SCRIPT" >> "$LOG_FILE" 2>&1 &
+    echo “启动 quant.py (via systemd)...”
+    ${SUDO} systemctl start quant.service
+    sleep 2
+
+    if ${SUDO} systemctl is-active --quiet quant.service; then
+        local PID=$(${SUDO} systemctl show quant.service -p MainPID --value 2>/dev/null)
+        echo “✅ quant.py 已启动，PID=$PID”
+        return 0
     else
-        echo "提示：未检测到虚拟环境 $VENV_DIR，建议先执行菜单 1 下载/更新项目与依赖。"
-        nohup "$PYTHON_CMD" "$PY_SCRIPT" >> "$LOG_FILE" 2>&1 &
+        echo “❌ quant.py 启动失败，日志如下：”
+        ${SUDO} systemctl status quant.service --no-pager
+        return 1
     fi
-
-    local NEW_PID=$!
-    echo "$NEW_PID" > "$PID_FILE"
-    echo "quant.py 已启动，PID=$NEW_PID"
-    add_cron_watchdog
 }
 
 stop_quant() {
     ensure_quant_dir
 
-    if [ ! -f "$PID_FILE" ]; then
-        echo "没有找到 PID 文件，可能 quant.py 未在运行。"
-        remove_cron_watchdog
+    # 停止 systemd service
+    if ${SUDO} systemctl is-active --quiet quant.service 2>/dev/null; then
+        echo "正在停止 quant.py (via systemd)..."
+        ${SUDO} systemctl stop quant.service
+        sleep 1
+        if ${SUDO} systemctl is-active --quiet quant.service; then
+            echo "进程未退出，尝试强制停止..."
+            ${SUDO} systemctl kill -s KILL quant.service
+        fi
+        echo "✅ quant.py 已停止"
         return 0
     fi
 
-    local PID
-    PID=$(cat "$PID_FILE" 2>/dev/null || echo "")
-    if [ -z "${PID}" ] || ! ps -p "$PID" >/dev/null 2>&1; then
-        echo "PID 文件存在但进程未运行，清理 PID 文件。"
+    # 备用：清理旧的 PID 文件和 cron 任务
+    if [ -f "$PID_FILE" ]; then
+        local PID
+        PID=$(cat "$PID_FILE" 2>/dev/null || echo "")
+        if [ -n "${PID}" ] && ps -p "$PID" >/dev/null 2>&1; then
+            echo "正在停止 quant.py (PID=$PID)..."
+            kill "$PID" || true
+            sleep 2
+            if ps -p "$PID" >/dev/null 2>&1; then
+                kill -9 "$PID" || true
+            fi
+        fi
         rm -f "$PID_FILE"
-        remove_cron_watchdog
-        return 0
     fi
 
-    echo "正在停止 quant.py (PID=$PID)..."
-    kill "$PID" || true
-
-    sleep 2
-    if ps -p "$PID" >/dev/null 2>&1; then
-        echo "进程未退出，尝试强制 kill -9..."
-        kill -9 "$PID" || true
-    fi
-
-    rm -f "$PID_FILE"
-    echo "quant.py 已停止。"
     remove_cron_watchdog
+    echo "quant.py 已停止"
 }
 
 # ============================================
@@ -734,14 +762,10 @@ show_status() {
     ensure_quant_dir
     echo -e "${C_CYAN}========== 服务运行状态 ==========${C_RESET}"
 
-    # quant.py 状态
-    if [ -f "$PID_FILE" ]; then
-        PID=$(cat "$PID_FILE" 2>/dev/null || echo "")
-        if [ -n "${PID}" ] && ps -p "$PID" > /dev/null 2>&1; then
-            echo -e "Quant.py:      ${C_GREEN}✅ active (running)${C_RESET} (PID=$PID)"
-        else
-            echo -e "Quant.py:      ${C_RED}❌ inactive${C_RESET}"
-        fi
+    # quant.py 状态（via systemd）
+    if ${SUDO} systemctl is-active --quiet quant.service 2>/dev/null; then
+        PID=$(${SUDO} systemctl show quant.service -p MainPID --value 2>/dev/null)
+        echo -e "Quant.py:      ${C_GREEN}✅ active (running)${C_RESET} (PID=$PID)"
     else
         echo -e "Quant.py:      ${C_RED}❌ inactive${C_RESET}"
     fi
@@ -763,8 +787,6 @@ show_status() {
     fi
 
     echo -e "${C_CYAN}==============================${C_RESET}"
-    echo "当前cron任务："
-    crontab -l 2>/dev/null | grep "quant.sh --cron-check" || echo "无相关cron任务。"
 }
 
 
@@ -1043,32 +1065,29 @@ restart_all_services() {
         return 1
     fi
 
-    # 停止服务
-    echo "正在停止服务..."
-    ${SUDO} systemctl stop quant-web 2>/dev/null || true
-    sleep 1
-    if ps aux | grep -v grep | grep "$PY_SCRIPT" >/dev/null 2>&1; then
-        pkill -f "$PY_SCRIPT" || true
-        sleep 1
+    # 创建 systemd service（如不存在）
+    if [ ! -f "/etc/systemd/system/quant.service" ]; then
+        echo "创建 systemd service..."
+        setup_systemd_service || return 1
     fi
 
-    # 启动 quant.py
+    # 停止服务
+    echo "正在停止服务..."
+    ${SUDO} systemctl stop quant.service 2>/dev/null || true
+    ${SUDO} systemctl stop quant-web 2>/dev/null || true
+    sleep 1
+
+    # 启动 quant.py（via systemd）
     echo "正在启动 quant.py..."
-    if $PYTHON_CMD "$PY_SCRIPT" > "$LOG_FILE" 2>&1 &
-    then
-        echo $! > "$PID_FILE"
-        NEW_PID=$!
-        sleep 2
-        if ps -p "$NEW_PID" >/dev/null 2>&1; then
-            echo -e "${C_GREEN}✅ quant.py 已启动，PID=$NEW_PID${C_RESET}"
-        else
-            echo -e "${C_RED}❌ quant.py 启动失败${C_RESET}"
-            tail -n 5 "$LOG_FILE" 2>/dev/null | sed "s/^/${C_RED}  /"
-            echo -e "${C_RESET}"
-            return 1
-        fi
+    ${SUDO} systemctl start quant.service
+    sleep 2
+
+    if ${SUDO} systemctl is-active --quiet quant.service; then
+        QUANT_PID=$(${SUDO} systemctl show quant.service -p MainPID --value 2>/dev/null)
+        echo -e "${C_GREEN}✅ quant.py 已启动，PID=$QUANT_PID${C_RESET}"
     else
         echo -e "${C_RED}❌ quant.py 启动失败${C_RESET}"
+        ${SUDO} systemctl status quant.service --no-pager
         return 1
     fi
 
@@ -1093,7 +1112,7 @@ restart_all_services() {
     echo -e "${C_CYAN}========== 系统状态 ==========${C_RESET}"
 
     # quant.py 状态
-    if ps -p "$(cat "$PID_FILE" 2>/dev/null)" >/dev/null 2>&1; then
+    if ${SUDO} systemctl is-active --quiet quant.service; then
         echo -e "Quant.py:      ${C_GREEN}✅ active (running)${C_RESET}"
     else
         echo -e "Quant.py:      ${C_RED}❌ inactive${C_RESET}"

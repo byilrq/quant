@@ -35,8 +35,8 @@ from strategy import (
 # 路径配置
 # ===========================
 BASE_DIR = Path(__file__).parent
-config_path = os.path.join(BASE_DIR, "quant.yaml")
-STATE_FILE = BASE_DIR / "quant_monitor_state.json"
+config_path = os.path.join(BASE_DIR, "dcf.yaml")
+STATE_FILE = BASE_DIR / "dcf_monitor_state.json"
 SYSTEM_CONFIG_FILE = BASE_DIR / "system_config.json"
 LOG_DIR = BASE_DIR / "log"
 TRADE_LOG_FILE = BASE_DIR / "trade_log.csv"
@@ -382,29 +382,23 @@ def normalize_symbol_state(name, cfg, entry):
 def rotate_and_backup_logs(now: datetime = None):
     if now is None:
         now = strategy_now()
-    log_file = BASE_DIR / "quant.log"
+    log_file = BASE_DIR / "dcf.log"
     backup_date = (now.date() - timedelta(days=1))
-    backup_file = LOG_DIR / f"quant.{backup_date.strftime('%Y%m%d')}.log"
-
+    backup_file = LOG_DIR / f"dcf.{backup_date.strftime('%Y%m%d')}.log"
     if not log_file.exists():
-        logging.info("ℹ️ quant.log 不存在，跳过日志轮转")
         return False
-
     try:
         # 1. 关闭所有 logger handlers，停止写入原文件
         logger = logging.getLogger()
         for handler in logger.handlers[:]:
-            try:
-                handler.close()
-                logger.removeHandler(handler)
-            except Exception as e:
-                print(f"关闭 handler 失败: {e}")
+            handler.close()
+            logger.removeHandler(handler)
 
         # 2. 重命名当前日志文件作为备份（原子操作，不丢失数据）
         if log_file.exists():
             log_file.rename(backup_file)
 
-        # 3. 重新配置日志系统（会自动创建新的空 quant.log）
+        # 3. 重新配置日志系统（会自动创建新的空 dcf.log）
         setup_logging()
 
         # 4. 记录轮转完成信息
@@ -415,10 +409,7 @@ def rotate_and_backup_logs(now: datetime = None):
         return True
     except Exception as e:
         print(f"日志轮转失败: {e}")
-        try:
-            setup_logging()
-        except Exception as e2:
-            print(f"日志轮转失败后恢复日志系统也失败: {e2}")
+        setup_logging()
         return False
 
 def setup_logging():
@@ -426,7 +417,7 @@ def setup_logging():
     logger.setLevel(logging.INFO)
     if logger.hasHandlers():
         logger.handlers.clear()
-    log_file = BASE_DIR / "quant.log"
+    log_file = BASE_DIR / "dcf.log"
     file_handler = logging.FileHandler(
         filename=str(log_file),
         encoding="utf-8",
@@ -454,9 +445,9 @@ def load_config(path):
         with open(path, "r", encoding="utf-8") as f:
             cfg = yaml.safe_load(f)
     cfg = cfg or {}
-    quant_cfg = cfg.get("SYMBOL_CONFIG", {}) or {}
+    dcf_cfg = cfg.get("SYMBOL_CONFIG", {}) or {}
     strategy_cfg = cfg.get("STRATEGY", {}) or {}
-    return quant_cfg, strategy_cfg, cfg
+    return dcf_cfg, strategy_cfg, cfg
 
 def save_full_config(full_cfg, path=None):
     target = path or config_path
@@ -484,7 +475,6 @@ def persist_runtime_position_to_config(name, current_units, avg_cost):
 
 FULL_CONFIG = {}
 STRATEGY = {
-    "loop_enabled": "yes",
     "loop_interval": 60,
     "fetch_history_days": 400,
     "ma_period_short": 150,
@@ -579,59 +569,40 @@ def should_do_daily_push(state: dict, now: datetime = None) -> bool:
 # 状态文件读写
 # ===========================
 def load_state():
-    yesterday = (strategy_now().date() - timedelta(days=1)).isoformat()
-    initial_state = {}
-    for name, cfg in SYMBOL_CONFIG.items():
-        initial_state[name] = build_default_symbol_state(cfg)
-    initial_state["_meta"] = {
-        "last_daily_push_date": yesterday,
-        "last_log_rotate_date": yesterday
-    }
-
     if STATE_FILE.exists():
         try:
             with open(STATE_FILE, "r", encoding="utf-8") as f:
                 state = json.load(f)
-            if not isinstance(state, dict):
-                logging.warning(f"状态文件格式错误，重置为初始状态")
-                return initial_state
-
             for name, cfg in SYMBOL_CONFIG.items():
                 if name not in state or not isinstance(state.get(name), dict):
                     state[name] = build_default_symbol_state(cfg)
                 else:
-                    try:
-                        state[name] = normalize_symbol_state(name, cfg, state[name])
-                    except Exception as e:
-                        logging.warning(f"标的 {name} 状态规范化失败，重置为初始状态: {e}")
-                        state[name] = build_default_symbol_state(cfg)
-
-            if "_meta" not in state or not isinstance(state.get("_meta"), dict):
-                state["_meta"] = initial_state["_meta"]
-            else:
-                if "last_log_rotate_date" not in state["_meta"]:
-                    state["_meta"]["last_log_rotate_date"] = yesterday
-                if "last_daily_push_date" not in state["_meta"]:
-                    state["_meta"]["last_daily_push_date"] = yesterday
+                    state[name] = normalize_symbol_state(name, cfg, state[name])
+            if "_meta" not in state:
+                state["_meta"] = {
+                    "last_daily_push_date": None,
+                    "last_log_rotate_date": None
+                }
+            elif "last_log_rotate_date" not in state["_meta"]:
+                state["_meta"]["last_log_rotate_date"] = None
             return state
         except Exception as e:
-            logging.error(f"加载状态文件异常: {e}，重置为初始状态")
-            return initial_state
+            logging.error(f"加载状态文件失败: {e}")
+            return {}
     initial_state = {}
     for name, cfg in SYMBOL_CONFIG.items():
         initial_state[name] = build_default_symbol_state(cfg)
-    yesterday = (strategy_now().date() - timedelta(days=1)).isoformat()
     initial_state["_meta"] = {
-        "last_daily_push_date": yesterday,
-        "last_log_rotate_date": yesterday
+        "last_daily_push_date": None,
+        "last_log_rotate_date": None
     }
     return initial_state
 
 def save_state(state):
     """Persist runtime state without clobbering a newer Web rollback request.
 
-    quant_web.py writes rollback/config requests into quant_monitor_state.json while
-    quant.py may still be finishing the current strategy loop.  Without this guard,
+    dcf_web.py writes rollback/config requests into dcf_monitor_state.json while
+    dcf.py may still be finishing the current strategy loop.  Without this guard,
     the loop-end save can overwrite the freshly written state_restore_entry with
     the old in-memory position, causing the Web params page to show the restored
     5% position while the daemon continues to run with the previous 20% state.
@@ -688,7 +659,7 @@ def _safe_int(value, default=0):
         return default
 
 def apply_runtime_config_reload_if_needed(state, last_seen_seq):
-    """Apply config reload requests written by quant_web.py without restarting quant.py.
+    """Apply config reload requests written by dcf_web.py without restarting dcf.py.
 
     Trade-state rollback is handled in two phases: restore the exact
     state_before snapshot first, then mark a restore_trade_rerun_seq so the
@@ -753,13 +724,13 @@ def apply_runtime_config_reload_if_needed(state, last_seen_seq):
                 merged_entry[_k] = disk_entry.get(_k)
         state[name] = normalize_symbol_state(name, SYMBOL_CONFIG[name], merged_entry)
         # Do not clear last_status_msg here. Parameter reload must not erase the last complete trading-frame status.
-        logging.info(f"🔁 参数已即时刷新: {name}，已加载最新 quant.yaml；运行仓位/成本已合并，状态正文等待下一轮行情刷新。")
+        logging.info(f"🔁 参数已即时刷新: {name}，已加载最新 dcf.yaml；运行仓位/成本已合并，状态正文等待下一轮行情刷新。")
     save_state(state)
     return seq
 
 
 def apply_system_config_update_if_needed(state, last_seen_seq):
-    """Apply Web system market-source changes without restarting quant.py.
+    """Apply Web system market-source changes without restarting dcf.py.
 
     When the preferred market source changes, old source confirmation state is no longer useful.
     Clearing it prevents one-time WARN like sina_a -> tencent_api after a deliberate setting change.
@@ -885,7 +856,7 @@ def read_source_metrics_refresh_request(state):
 
 
 def has_pending_web_refresh_request(state: dict) -> bool:
-    """Return True when Web wrote a refresh/control seq newer than what quant.py has consumed.
+    """Return True when Web wrote a refresh/control seq newer than what dcf.py has consumed.
 
     The old loop slept for loop_interval seconds unconditionally, so a user could click
     refresh during trading hours and wait up to a full interval before anything happened.
@@ -1010,8 +981,8 @@ def build_daily_snapshot(state: dict) -> str:
     lines = []
     current_time = strategy_now().strftime("%Y.%m.%d.%H:%M")
     for name in SYMBOL_CONFIG.keys():
-        quant_state = state.get(name, {})
-        status = quant_state.get("last_status_msg")
+        dcf_state = state.get(name, {})
+        status = dcf_state.get("last_status_msg")
         cfg = SYMBOL_CONFIG.get(name, {})
         strategy_run = normalize_strategy_run_value(cfg.get("strategy_run", "on"), "on")
         if status:
@@ -1112,15 +1083,15 @@ def _is_all_sources_failed_reason(reason):
     return ("全部数据源失败" in text) or ("全部行情源失败" in text) or ("全部数据源" in text and "失败" in text)
 
 
-def _maybe_market_alert(quant_state, msg, reason_key):
+def _maybe_market_alert(dcf_state, msg, reason_key):
     """只有全部行情源失败才推送，并按标的/自然日去重。"""
     if not _is_all_sources_failed_reason(reason_key):
         return []
     day_key = strategy_now().strftime("%Y%m%d")
     alert_key = f"{day_key}|all_sources_failed"
-    if quant_state.get("last_market_all_sources_alert_key") == alert_key:
+    if dcf_state.get("last_market_all_sources_alert_key") == alert_key:
         return []
-    quant_state["last_market_all_sources_alert_key"] = alert_key
+    dcf_state["last_market_all_sources_alert_key"] = alert_key
     return [msg]
 
 def _json_safe_value(value):
@@ -1223,7 +1194,7 @@ def _prune_state_backups(index_items, name, symbol, keep=10):
     return pruned
 
 
-def record_trade_state_backup(name, symbol, quant_state, cfg, trade_info):
+def record_trade_state_backup(name, symbol, dcf_state, cfg, trade_info):
     """Record state before a real TRADE so Web can roll back if a false signal occurs."""
     try:
         now = strategy_now()
@@ -1234,7 +1205,7 @@ def record_trade_state_backup(name, symbol, quant_state, cfg, trade_info):
         day_dir.mkdir(parents=True, exist_ok=True)
         filename = f"{_sanitize_filename_part(symbol)}_{ts_file}_before_trade.json"
         path = day_dir / filename
-        state_before = _json_safe_value(dict(quant_state or {}))
+        state_before = _json_safe_value(dict(dcf_state or {}))
         cfg_before = _json_safe_value(dict(cfg or {}))
         record = {
             "id": backup_id,
@@ -1273,7 +1244,7 @@ def record_trade_state_backup(name, symbol, quant_state, cfg, trade_info):
     except Exception as e:
         logging.warning(f"⚠️ 记录交易前状态回滚点失败: {name} ({symbol}) | {e}")
 
-def write_market_skip_snapshot(name, symbol, quant_state, reason, level="ERROR", source="", current_price=None,
+def write_market_skip_snapshot(name, symbol, dcf_state, reason, level="ERROR", source="", current_price=None,
                                last_known_price=None, closes_count=None, last_bar_date=None, trade_allowed=False):
     write_strategy_snapshot({
         "time": strategy_now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -1284,36 +1255,36 @@ def write_market_skip_snapshot(name, symbol, quant_state, reason, level="ERROR",
         "decision": "SKIP_TRADE",
         "reason": str(reason),
         "market_status": "error" if str(level).upper() == "ERROR" else "warn",
-        "market_source": _display_source_name(source or quant_state.get("market_source", "")),
+        "market_source": _display_source_name(source or dcf_state.get("market_source", "")),
         "current_price": current_price,
-        "last_valid_price": last_known_price if last_known_price is not None else quant_state.get("last_valid_price"),
-        "last_price": quant_state.get("last_price"),
+        "last_valid_price": last_known_price if last_known_price is not None else dcf_state.get("last_valid_price"),
+        "last_price": dcf_state.get("last_price"),
         "last_bar_date": last_bar_date,
         "history_count": closes_count,
         "trade_allowed": bool(trade_allowed),
-        "current_units": quant_state.get("current_units"),
-        "avg_cost": quant_state.get("avg_cost"),
-        "last_trade_price": quant_state.get("last_trade_price"),
-        "last_add_price": quant_state.get("last_add_price"),
-        "pyramid_step": quant_state.get("pyramid_step"),
-        "clear_step": quant_state.get("clear_step"),
+        "current_units": dcf_state.get("current_units"),
+        "avg_cost": dcf_state.get("avg_cost"),
+        "last_trade_price": dcf_state.get("last_trade_price"),
+        "last_add_price": dcf_state.get("last_add_price"),
+        "pyramid_step": dcf_state.get("pyramid_step"),
+        "clear_step": dcf_state.get("clear_step"),
     })
 
 
-def _mark_market_error(quant_state, msg, reason, source=""):
-    quant_state["last_status_msg"] = msg
-    quant_state["market_status"] = "error"
-    quant_state["market_error"] = str(reason)[:500]
+def _mark_market_error(dcf_state, msg, reason, source=""):
+    dcf_state["last_status_msg"] = msg
+    dcf_state["market_status"] = "error"
+    dcf_state["market_error"] = str(reason)[:500]
     if source:
-        quant_state["market_source"] = _display_source_name(source)
+        dcf_state["market_source"] = _display_source_name(source)
 
 
-def _mark_market_warn(quant_state, msg, reason, source=""):
-    quant_state["last_status_msg"] = msg
-    quant_state["market_status"] = "warn"
-    quant_state["market_error"] = str(reason)[:500]
+def _mark_market_warn(dcf_state, msg, reason, source=""):
+    dcf_state["last_status_msg"] = msg
+    dcf_state["market_status"] = "warn"
+    dcf_state["market_error"] = str(reason)[:500]
     if source:
-        quant_state["market_source"] = _display_source_name(source)
+        dcf_state["market_source"] = _display_source_name(source)
 
 
 def _canonical_market_source(source):
@@ -1418,13 +1389,13 @@ def _strategy_calc_cache_key(symbol, strategy_source, last_bar_date, ma_len, cfg
     return "|".join(parts)
 
 
-def _check_market_source_switch(quant_state, snapshot, cfg):
+def _check_market_source_switch(dcf_state, snapshot, cfg):
     """行情源切换首轮禁止交易，连续确认后才允许新源进入策略。"""
     new_source = snapshot.source
-    last_source = quant_state.get("last_valid_market_source") or quant_state.get("market_source")
+    last_source = dcf_state.get("last_valid_market_source") or dcf_state.get("market_source")
     if not last_source or last_source == new_source or _canonical_market_source(last_source) in {"", _canonical_market_source(new_source)}:
-        quant_state["pending_market_source"] = ""
-        quant_state["pending_market_source_count"] = 0
+        dcf_state["pending_market_source"] = ""
+        dcf_state["pending_market_source_count"] = 0
         return True, ""
 
     try:
@@ -1433,15 +1404,15 @@ def _check_market_source_switch(quant_state, snapshot, cfg):
         required = 2
     required = max(2, required)
 
-    pending_source = quant_state.get("pending_market_source")
-    pending_count = int(_safe_float(quant_state.get("pending_market_source_count", 0), 0))
+    pending_source = dcf_state.get("pending_market_source")
+    pending_count = int(_safe_float(dcf_state.get("pending_market_source_count", 0), 0))
     if pending_source == new_source:
         pending_count += 1
     else:
         pending_source = new_source
         pending_count = 1
-    quant_state["pending_market_source"] = pending_source
-    quant_state["pending_market_source_count"] = pending_count
+    dcf_state["pending_market_source"] = pending_source
+    dcf_state["pending_market_source_count"] = pending_count
 
     if pending_count < required:
         return False, f"行情源从 {_display_source_name(last_source)} 切换到 {_display_source_name(new_source)}，等待连续确认 {pending_count}/{required}；本轮只监控不交易"
@@ -1449,15 +1420,15 @@ def _check_market_source_switch(quant_state, snapshot, cfg):
     return True, f"行情源从 {_display_source_name(last_source)} 切换到 {_display_source_name(new_source)}，已连续确认 {pending_count}/{required}"
 
 
-def _mark_market_ok(quant_state, snapshot):
-    quant_state["market_status"] = "ok"
-    quant_state["market_error"] = ""
-    quant_state["market_source"] = _display_source_name(snapshot.source)
-    quant_state["last_valid_market_source"] = _display_source_name(snapshot.source)
-    quant_state["last_valid_price"] = snapshot.current_price
-    quant_state["last_valid_bar_date"] = snapshot.last_bar_date
-    quant_state["pending_market_source"] = ""
-    quant_state["pending_market_source_count"] = 0
+def _mark_market_ok(dcf_state, snapshot):
+    dcf_state["market_status"] = "ok"
+    dcf_state["market_error"] = ""
+    dcf_state["market_source"] = _display_source_name(snapshot.source)
+    dcf_state["last_valid_market_source"] = _display_source_name(snapshot.source)
+    dcf_state["last_valid_price"] = snapshot.current_price
+    dcf_state["last_valid_bar_date"] = snapshot.last_bar_date
+    dcf_state["pending_market_source"] = ""
+    dcf_state["pending_market_source_count"] = 0
 
 # ===========================
 # 计算简单移动平均线 MA（带数据不足处理）
@@ -1576,7 +1547,7 @@ def _history_source_options_for_symbol(symbol):
     """Return historical strategy sources in fallback order.
 
     The system-selected source is tried first. Other sources are only per-symbol,
-    per-run fallbacks and never rewrite system_config.json or quant.yaml.
+    per-run fallbacks and never rewrite system_config.json or dcf.yaml.
     """
     raw = str(symbol or "").upper().strip()
     system_cfg = _read_system_config_for_metrics()
@@ -1649,22 +1620,22 @@ def _calc_source_metric_from_snapshot(source_key, source_label, symbol, cfg, sna
     }
 
 
-def _source_metric_from_strategy_state(symbol, cfg, quant_state):
+def _source_metric_from_strategy_state(symbol, cfg, dcf_state):
     """Build the Web 回测/策略指标 card from the latest strategy calculation cache."""
-    strategy_source = _display_source_name(quant_state.get("strategy_source") or _strategy_source_for_symbol(symbol))
-    cache = quant_state.get("strategy_calc_cache") if isinstance(quant_state.get("strategy_calc_cache"), dict) else {}
-    ma150 = _safe_float(quant_state.get("ma_short", cache.get("ma150")), 0.0)
-    dynamic_k = _safe_float(quant_state.get("dynamic_k150", cache.get("dynamic_k150")), 0.0)
-    sideways = _safe_float(quant_state.get("sideways_score", cache.get("sideways_score")), 0.0)
-    current_price = _safe_float(quant_state.get("last_price"), 0.0)
-    ma150_source = str(quant_state.get("ma_short_source") or cache.get("ma150_source") or "")
-    last_bar_date = str(cache.get("last_bar_date") or quant_state.get("last_valid_bar_date") or "")
-    updated_at = str(quant_state.get("strategy_calc_updated_at") or cache.get("updated_at") or strategy_now().strftime("%Y-%m-%d %H:%M:%S"))
-    history_count = _safe_int(cache.get("history_count", quant_state.get("history_count", 0)), 0)
+    strategy_source = _display_source_name(dcf_state.get("strategy_source") or _strategy_source_for_symbol(symbol))
+    cache = dcf_state.get("strategy_calc_cache") if isinstance(dcf_state.get("strategy_calc_cache"), dict) else {}
+    ma150 = _safe_float(dcf_state.get("ma_short", cache.get("ma150")), 0.0)
+    dynamic_k = _safe_float(dcf_state.get("dynamic_k150", cache.get("dynamic_k150")), 0.0)
+    sideways = _safe_float(dcf_state.get("sideways_score", cache.get("sideways_score")), 0.0)
+    current_price = _safe_float(dcf_state.get("last_price"), 0.0)
+    ma150_source = str(dcf_state.get("ma_short_source") or cache.get("ma150_source") or "")
+    last_bar_date = str(cache.get("last_bar_date") or dcf_state.get("last_valid_bar_date") or "")
+    updated_at = str(dcf_state.get("strategy_calc_updated_at") or cache.get("updated_at") or strategy_now().strftime("%Y-%m-%d %H:%M:%S"))
+    history_count = _safe_int(cache.get("history_count", dcf_state.get("history_count", 0)), 0)
     ok = ma150 > 0 and current_price > 0
-    err = str(quant_state.get("strategy_error") or "")
-    level = str(quant_state.get("strategy_level") or ("INFO" if ok else "ERROR")).upper()
-    status = str(quant_state.get("strategy_status") or ("OK" if ok else "ERROR")).upper()
+    err = str(dcf_state.get("strategy_error") or "")
+    level = str(dcf_state.get("strategy_level") or ("INFO" if ok else "ERROR")).upper()
+    status = str(dcf_state.get("strategy_status") or ("OK" if ok else "ERROR")).upper()
     if ok and ma150_source and ma150_source != "f" and level == "INFO":
         level = "WARN"
         status = "WARN"
@@ -1823,7 +1794,7 @@ def _build_strategy_calc_from_snapshot(source_key, source_label, symbol, cfg, sn
     }
 
 
-def _select_strategy_calc_for_symbol(symbol, cfg, market_snapshot, fetch_days, ma_short_len, quant_state=None):
+def _select_strategy_calc_for_symbol(symbol, cfg, market_snapshot, fetch_days, ma_short_len, dcf_state=None):
     """Return the final strategy calculation result for this symbol/day.
 
     Result selection ignores which source produced it after calculation. The
@@ -1831,7 +1802,7 @@ def _select_strategy_calc_for_symbol(symbol, cfg, market_snapshot, fetch_days, m
     when it is present, intraday loops reuse it and only realtime price is
     refreshed.
     """
-    quant_state = quant_state if isinstance(quant_state, dict) else {}
+    dcf_state = dcf_state if isinstance(dcf_state, dict) else {}
     today_key = strategy_now().strftime("%Y-%m-%d")
     cached = _metric_payload_to_strategy_cache(_read_strategy_history_cache(symbol, today_key), cfg)
     if cached:
@@ -1841,8 +1812,8 @@ def _select_strategy_calc_for_symbol(symbol, cfg, market_snapshot, fetch_days, m
     # Daily failure cache: if all historical sources were already traversed today,
     # do not hammer the same sources every loop. The alert path still pushes only
     # once per day. Clear this by deleting state or waiting for the next strategy day.
-    if str(quant_state.get("strategy_history_failed_date") or "") == today_key:
-        cached_reason = str(quant_state.get("strategy_history_failed_reason") or "").strip()
+    if str(dcf_state.get("strategy_history_failed_date") or "") == today_key:
+        cached_reason = str(dcf_state.get("strategy_history_failed_reason") or "").strip()
         if cached_reason:
             raise RuntimeError(cached_reason)
 
@@ -1873,8 +1844,8 @@ def _select_strategy_calc_for_symbol(symbol, cfg, market_snapshot, fetch_days, m
             })
             calc["strategy_source_attempts"] = attempts[:]
             if str(calc.get("ma150_source")) == "f":
-                quant_state.pop("strategy_history_failed_date", None)
-                quant_state.pop("strategy_history_failed_reason", None)
+                dcf_state.pop("strategy_history_failed_date", None)
+                dcf_state.pop("strategy_history_failed_reason", None)
                 _write_strategy_history_cache(symbol, calc, today_key)
                 calc["from_cache"] = False
                 return calc
@@ -1896,27 +1867,27 @@ def _select_strategy_calc_for_symbol(symbol, cfg, market_snapshot, fetch_days, m
 
     if best_partial:
         best_partial["strategy_source_attempts"] = attempts[:]
-        quant_state.pop("strategy_history_failed_date", None)
-        quant_state.pop("strategy_history_failed_reason", None)
+        dcf_state.pop("strategy_history_failed_date", None)
+        dcf_state.pop("strategy_history_failed_reason", None)
         _write_strategy_history_cache(symbol, best_partial, today_key)
         best_partial["from_cache"] = False
         return best_partial
 
     error_text = "；".join(f"{x.get('source')}: {x.get('error') or x.get('status')}" for x in attempts) or "无可用历史数据源"
     final_error = f"全部历史数据源失败，无法计算MA150：{error_text}"
-    quant_state["strategy_history_failed_date"] = today_key
-    quant_state["strategy_history_failed_reason"] = final_error
-    quant_state["strategy_source_attempts"] = attempts[:]
+    dcf_state["strategy_history_failed_date"] = today_key
+    dcf_state["strategy_history_failed_reason"] = final_error
+    dcf_state["strategy_source_attempts"] = attempts[:]
     raise RuntimeError(final_error)
 
 
-def _maybe_strategy_history_alert(quant_state, msg, reason_key):
+def _maybe_strategy_history_alert(dcf_state, msg, reason_key):
     """Push strategy-history data errors at most once per symbol per day."""
     day_key = strategy_now().strftime("%Y%m%d")
     alert_key = f"{day_key}|strategy_history_failed"
-    if quant_state.get("last_strategy_history_alert_key") == alert_key:
+    if dcf_state.get("last_strategy_history_alert_key") == alert_key:
         return []
-    quant_state["last_strategy_history_alert_key"] = alert_key
+    dcf_state["last_strategy_history_alert_key"] = alert_key
     return [msg]
 
 def refresh_source_metrics_for_symbol(name, cfg, state):
@@ -1929,13 +1900,13 @@ def refresh_source_metrics_for_symbol(name, cfg, state):
     history snapshots such as SYMBOL_historical_a3_400_1p0_YYYY-MM-DD.json.
     """
     symbol = str((cfg or {}).get("symbol", "") or "").strip().upper()
-    quant_state = state.setdefault(name, build_default_symbol_state(cfg))
+    dcf_state = state.setdefault(name, build_default_symbol_state(cfg))
     fetch_days = int(_safe_float(STRATEGY.get("fetch_history_days", 400), 400))
     ma_short_len = int(_safe_float(STRATEGY.get("ma_period_short", 150), 150))
-    current_price = _safe_float(quant_state.get("last_price", 0.0), 0.0)
+    current_price = _safe_float(dcf_state.get("last_price", 0.0), 0.0)
     try:
         strategy_calc = _select_strategy_calc_for_symbol(
-            symbol, cfg, None, fetch_days, ma_short_len, quant_state=quant_state
+            symbol, cfg, None, fetch_days, ma_short_len, dcf_state=dcf_state
         )
         strategy_source = _display_source_name(strategy_calc.get("strategy_source") or strategy_calc.get("strategy_source_key") or _strategy_source_for_symbol(symbol))
         if bool(strategy_calc.get("strategy_source_fallback")):
@@ -1950,7 +1921,7 @@ def refresh_source_metrics_for_symbol(name, cfg, state):
         level = "INFO" if strategy_status == "OK" else "WARN"
         error = "" if ma150_source == "f" else f"策略数据为非完整口径: MA150来源={ma150_source}"
         updated_at = strategy_calc.get("updated_at") or strategy_now().strftime("%Y-%m-%d %H:%M:%S")
-        quant_state["strategy_calc_cache"] = {
+        dcf_state["strategy_calc_cache"] = {
             "symbol": symbol,
             "strategy_source": strategy_source,
             "strategy_source_key": strategy_calc.get("strategy_source_key"),
@@ -1967,26 +1938,26 @@ def refresh_source_metrics_for_symbol(name, cfg, state):
             "strategy_source_attempts": strategy_calc.get("attempts") or strategy_calc.get("strategy_source_attempts") or [],
             "updated_at": updated_at,
         }
-        quant_state["strategy_source"] = strategy_source
-        quant_state["strategy_status"] = strategy_status
-        quant_state["strategy_level"] = level
-        quant_state["strategy_error"] = error
-        quant_state["strategy_calc_updated_at"] = updated_at
-        quant_state["ma_short"] = ma150
-        quant_state["ma_short_source"] = ma150_source
-        quant_state["dynamic_k150"] = dynamic_k150
-        quant_state["sideways_score"] = sideways_score
-        quant_state["k150"] = base_k150
-        quant_state["history_count"] = _safe_int(strategy_calc.get("history_count", 0), 0)
-        quant_state["last_valid_bar_date"] = strategy_calc.get("last_bar_date", "")
+        dcf_state["strategy_source"] = strategy_source
+        dcf_state["strategy_status"] = strategy_status
+        dcf_state["strategy_level"] = level
+        dcf_state["strategy_error"] = error
+        dcf_state["strategy_calc_updated_at"] = updated_at
+        dcf_state["ma_short"] = ma150
+        dcf_state["ma_short_source"] = ma150_source
+        dcf_state["dynamic_k150"] = dynamic_k150
+        dcf_state["sideways_score"] = sideways_score
+        dcf_state["k150"] = base_k150
+        dcf_state["history_count"] = _safe_int(strategy_calc.get("history_count", 0), 0)
+        dcf_state["last_valid_bar_date"] = strategy_calc.get("last_bar_date", "")
         if current_price > 0:
-            quant_state["last_price"] = current_price
-        quant_state["source_metrics"] = [_source_metric_from_strategy_state(symbol, cfg, quant_state)]
-        quant_state["source_metrics_updated_at"] = updated_at
-        quant_state["source_metrics_error"] = error
-        quant_state["strategy_metrics_level"] = level
+            dcf_state["last_price"] = current_price
+        dcf_state["source_metrics"] = [_source_metric_from_strategy_state(symbol, cfg, dcf_state)]
+        dcf_state["source_metrics_updated_at"] = updated_at
+        dcf_state["source_metrics_error"] = error
+        dcf_state["strategy_metrics_level"] = level
         logging.info(f"📊 已刷新本标的最终策略指标: {name} ({symbol})，源={strategy_source}，MA150={ma150_source}。")
-        return quant_state["source_metrics"]
+        return dcf_state["source_metrics"]
     except Exception as e:
         reason = str(e)[:500] or "全部历史数据源失败，无法计算MA150"
         updated_at = strategy_now().strftime("%Y-%m-%d %H:%M:%S")
@@ -2009,13 +1980,13 @@ def refresh_source_metrics_for_symbol(name, cfg, state):
             "zone": "",
             "error": reason,
         }
-        quant_state["source_metrics"] = [metric]
-        quant_state["source_metrics_updated_at"] = updated_at
-        quant_state["source_metrics_error"] = reason
-        quant_state["strategy_metrics_level"] = "ERROR"
-        quant_state["strategy_status"] = "ERROR"
-        quant_state["strategy_level"] = "ERROR"
-        quant_state["strategy_error"] = reason
+        dcf_state["source_metrics"] = [metric]
+        dcf_state["source_metrics_updated_at"] = updated_at
+        dcf_state["source_metrics_error"] = reason
+        dcf_state["strategy_metrics_level"] = "ERROR"
+        dcf_state["strategy_status"] = "ERROR"
+        dcf_state["strategy_level"] = "ERROR"
+        dcf_state["strategy_error"] = reason
         logging.info(f"📊 刷新本标的最终策略指标失败: {name} ({symbol})，{reason}")
         return [metric]
 
@@ -2024,7 +1995,7 @@ def refresh_source_metrics_for_symbol(name, cfg, state):
 # ===========================
 # 推送功能
 # ===========================
-# 推送实现已独立到 push.py；quant.py 只调用 send_notification。
+# 推送实现已独立到 push.py；dcf.py 只调用 send_notification。
 
 # ===========================
 # 辅助消息生成（与策略无关，保留在实盘中）
@@ -2101,7 +2072,7 @@ def build_stop_message(name, symbol, now_str, zone, current_price, last_trade_pr
         f"🔀MA150={ma150:.3f}({ma150_source}), Trend={sell_price:.3f}, Clear={clear_price:.3f}"
     )
 
-def log_trade(quant_name, symbol, price, qty, side, reason, zone=None,
+def log_trade(dcf_name, symbol, price, qty, side, reason, zone=None,
               pos_before=None, pos_after=None,
               avg_cost_before=None, avg_cost_after=None,
               last_trade_price_before=None, last_trade_price_after=None,
@@ -2115,7 +2086,7 @@ def log_trade(quant_name, symbol, price, qty, side, reason, zone=None,
         if not file_exists:
             writer.writerow([
                 "date",
-                "quant_name",
+                "dcf_name",
                 "symbol",
                 "action",
                 "price",
@@ -2134,7 +2105,7 @@ def log_trade(quant_name, symbol, price, qty, side, reason, zone=None,
         now_str = strategy_now().strftime("%Y-%m-%d %H:%M:%S")
         writer.writerow([
             now_str,
-            quant_name,
+            dcf_name,
             symbol,
             side,
             f"{price:.3f}",
@@ -2155,7 +2126,7 @@ def log_trade(quant_name, symbol, price, qty, side, reason, zone=None,
 # 核心策略逻辑（调用 strategy 模块）
 # ===========================
 
-def build_no_trade_reason(zone, cfg, quant_state, state_dict, current_price, ma150, current_units,
+def build_no_trade_reason(zone, cfg, dcf_state, state_dict, current_price, ma150, current_units,
                           base_units, target_units, limit_units, position_mode, add_reason, add_qty,
                           clear_step, last_trade_price):
     """Explain why a valid market frame did not trigger a BUY/SELL.
@@ -2355,29 +2326,29 @@ def append_strategy_issue_to_reason(reason, strategy_issue, ma150_source=None):
         return f"{reason}（MA150={src}，触发价为估算）"
     return f"{reason}（{issue}）"
 
-def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", refresh_reference=False):
+def strategy_for_dcf(name, cfg, state, allow_trade=True, refresh_reason="", refresh_reference=False):
     symbol = cfg["symbol"]
     position_mode = get_position_mode(cfg)
     base_units = get_base_units(cfg)
     target_units = get_target_units(cfg)
     limit_units = get_limit_units(cfg)
     strategy_run = normalize_strategy_run_value(cfg.get("strategy_run", "on"), "on")
-    quant_state = state.setdefault(name, build_default_symbol_state(cfg))
-    quant_state = normalize_symbol_state(name, cfg, quant_state)
-    tick = quant_state.get("tick", 0) + 1
-    quant_state["tick"] = tick
-    last_trade_price = quant_state.get("last_trade_price")
-    last_trade_side = quant_state.get("last_trade_side", "buy")
-    last_known_price = quant_state.get("last_price")
-    current_units = normalize_position_amount(quant_state.get("current_units", base_units), position_mode)
-    current_avg_cost = quant_state.get("avg_cost", 0.0)
+    dcf_state = state.setdefault(name, build_default_symbol_state(cfg))
+    dcf_state = normalize_symbol_state(name, cfg, dcf_state)
+    tick = dcf_state.get("tick", 0) + 1
+    dcf_state["tick"] = tick
+    last_trade_price = dcf_state.get("last_trade_price")
+    last_trade_side = dcf_state.get("last_trade_side", "buy")
+    last_known_price = dcf_state.get("last_price")
+    current_units = normalize_position_amount(dcf_state.get("current_units", base_units), position_mode)
+    current_avg_cost = dcf_state.get("avg_cost", 0.0)
     # Runtime state is authoritative during normal strategy loops.
     # YAML current_units/current_avg_cost are only used by build_default_symbol_state()
     # for new symbols or explicit Web reset, and must not overwrite live state here.
     price_scale = cfg.get("price_scale", 1.0)
     fetch_days = STRATEGY.get("fetch_history_days", 400)
     ma_short_len = STRATEGY.get("ma_period_short", 150)
-    last_valid_price = quant_state.get("last_valid_price") or last_known_price
+    last_valid_price = dcf_state.get("last_valid_price") or last_known_price
 
     try:
         snapshot = get_market_snapshot(symbol, fetch_days, price_scale=price_scale)
@@ -2387,9 +2358,10 @@ def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", re
             name, symbol, reason, last_known_price=last_valid_price
         )
         logging.info(msg)
-        _mark_market_error(quant_state, msg, reason)
-        write_market_skip_snapshot(name, symbol, quant_state, reason, level="ERROR", last_known_price=last_valid_price)
-        return _maybe_market_alert(quant_state, msg, reason)
+        _mark_market_error(dcf_state, msg, reason)
+        write_market_skip_snapshot(name, symbol, dcf_state, reason, level="ERROR", last_known_price=last_valid_price)
+        return _maybe_market_alert(dcf_state, msg, reason)
+
 
     # 缓存状态页参考价；交易时段内后台每轮刷新当前标的的全部实时源。
     # Web 页面仅读缓存，避免每次打开页面都直接阻塞拉行情。
@@ -2401,13 +2373,13 @@ def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", re
                 for _ref in refs:
                     if isinstance(_ref, dict):
                         _ref["updated_at"] = updated_at
-                quant_state["reference_prices"] = refs
-                quant_state["reference_prices_updated_at"] = updated_at
-                quant_state["reference_prices_error"] = ""
+                dcf_state["reference_prices"] = refs
+                dcf_state["reference_prices_updated_at"] = updated_at
+                dcf_state["reference_prices_error"] = ""
             else:
-                quant_state["reference_prices_error"] = "参考价返回为空"
+                dcf_state["reference_prices_error"] = "参考价返回为空"
         except Exception as e:
-            quant_state["reference_prices_error"] = str(e)[:300]
+            dcf_state["reference_prices_error"] = str(e)[:300]
 
     if not getattr(snapshot, "trade_allowed", True):
         reason = getattr(snapshot, "error", "行情来自缓存或观察源，本轮只监控不交易") or "行情来自缓存或观察源，本轮只监控不交易"
@@ -2417,9 +2389,9 @@ def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", re
             source=getattr(snapshot, "source", ""), last_bar_date=getattr(snapshot, "last_bar_date", None)
         )
         logging.warning(msg)
-        _mark_market_error(quant_state, msg, reason, getattr(snapshot, "source", ""))
+        _mark_market_error(dcf_state, msg, reason, getattr(snapshot, "source", ""))
         write_market_skip_snapshot(
-            name, symbol, quant_state, reason, level="ERROR",
+            name, symbol, dcf_state, reason, level="ERROR",
             current_price=getattr(snapshot, "current_price", None),
             last_known_price=last_valid_price,
             closes_count=len(getattr(snapshot, "closes", []) or []),
@@ -2427,7 +2399,7 @@ def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", re
             last_bar_date=getattr(snapshot, "last_bar_date", None),
             trade_allowed=False,
         )
-        return _maybe_market_alert(quant_state, msg, reason)
+        return _maybe_market_alert(dcf_state, msg, reason)
 
     closes = snapshot.closes
     current_price = snapshot.current_price
@@ -2439,16 +2411,16 @@ def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", re
             source=snapshot.source, last_bar_date=snapshot.last_bar_date
         )
         logging.info(msg)
-        _mark_market_error(quant_state, msg, reason, snapshot.source)
+        _mark_market_error(dcf_state, msg, reason, snapshot.source)
         write_market_skip_snapshot(
-            name, symbol, quant_state, reason, level="ERROR",
+            name, symbol, dcf_state, reason, level="ERROR",
             current_price=current_price, last_known_price=last_valid_price,
             closes_count=len(closes), source=snapshot.source, last_bar_date=snapshot.last_bar_date,
             trade_allowed=False,
         )
-        return _maybe_market_alert(quant_state, msg, reason)
+        return _maybe_market_alert(dcf_state, msg, reason)
 
-    source_ok, source_reason = _check_market_source_switch(quant_state, snapshot, cfg)
+    source_ok, source_reason = _check_market_source_switch(dcf_state, snapshot, cfg)
     if not source_ok:
         msg = _build_market_data_warn_message(
             name, symbol, source_reason, current_price=current_price,
@@ -2456,9 +2428,9 @@ def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", re
             source=snapshot.source, last_bar_date=snapshot.last_bar_date
         )
         logging.warning(msg)
-        _mark_market_warn(quant_state, msg, source_reason, snapshot.source)
+        _mark_market_warn(dcf_state, msg, source_reason, snapshot.source)
         write_market_skip_snapshot(
-            name, symbol, quant_state, source_reason, level="WARN",
+            name, symbol, dcf_state, source_reason, level="WARN",
             current_price=current_price, last_known_price=last_valid_price,
             closes_count=len(closes), source=snapshot.source, last_bar_date=snapshot.last_bar_date,
             trade_allowed=False,
@@ -2478,15 +2450,15 @@ def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", re
             source=snapshot.source, last_bar_date=snapshot.last_bar_date
         )
         logging.warning(msg)
-        _mark_market_error(quant_state, msg, reason, snapshot.source)
+        _mark_market_error(dcf_state, msg, reason, snapshot.source)
         write_market_skip_snapshot(
-            name, symbol, quant_state, reason, level="ERROR",
+            name, symbol, dcf_state, reason, level="ERROR",
             current_price=current_price, last_known_price=last_valid_price,
             closes_count=len(closes), source=snapshot.source, last_bar_date=snapshot.last_bar_date,
             trade_allowed=False,
         )
         # 关键：异常行情不更新交易锚点，不触发交易。
-        return _maybe_market_alert(quant_state, msg, reason)
+        return _maybe_market_alert(dcf_state, msg, reason)
 
     if len(closes) >= 2:
         suspicious_prev, prev_ratio = _is_price_jump_suspicious(current_price, closes[-2], max(max_jump, 0.35))
@@ -2498,23 +2470,23 @@ def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", re
                 source=snapshot.source, last_bar_date=snapshot.last_bar_date
             )
             logging.warning(msg)
-            _mark_market_error(quant_state, msg, reason, snapshot.source)
+            _mark_market_error(dcf_state, msg, reason, snapshot.source)
             write_market_skip_snapshot(
-                name, symbol, quant_state, reason, level="ERROR",
+                name, symbol, dcf_state, reason, level="ERROR",
                 current_price=current_price, last_known_price=last_valid_price,
                 closes_count=len(closes), source=snapshot.source, last_bar_date=snapshot.last_bar_date,
                 trade_allowed=False,
             )
-            return _maybe_market_alert(quant_state, msg, reason)
+            return _maybe_market_alert(dcf_state, msg, reason)
 
     if last_trade_price is None or last_trade_price <= 0:
         last_trade_price = current_price
-        quant_state["last_trade_price"] = current_price
-        quant_state["last_trade_side"] = "buy"
+        dcf_state["last_trade_price"] = current_price
+        dcf_state["last_trade_side"] = "buy"
 
     try:
         strategy_calc = _select_strategy_calc_for_symbol(
-            symbol, cfg, snapshot, fetch_days, ma_short_len, quant_state=quant_state
+            symbol, cfg, snapshot, fetch_days, ma_short_len, dcf_state=dcf_state
         )
     except Exception as e:
         reason = str(e)[:500] or "全部历史数据源失败，无法计算MA150"
@@ -2524,25 +2496,25 @@ def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", re
             source=snapshot.source, last_bar_date=snapshot.last_bar_date
         )
         logging.info(msg)
-        quant_state["strategy_status"] = "ERROR"
-        quant_state["strategy_level"] = "ERROR"
-        quant_state["strategy_error"] = reason
-        quant_state["source_metrics"] = [{
+        dcf_state["strategy_status"] = "ERROR"
+        dcf_state["strategy_level"] = "ERROR"
+        dcf_state["strategy_error"] = reason
+        dcf_state["source_metrics"] = [{
             "key": "strategy_history", "label": "本标的策略值", "ok": False, "level": "ERROR", "status": "ERROR",
             "source": "全部历史数据源", "date": getattr(snapshot, "last_bar_date", "") or "", "count": len(closes),
             "current_price": current_price, "ma150": None, "sell": None, "clear": None,
             "dynamic_k": None, "sideways_score": None, "ma150_source": "", "zone": "", "error": reason,
         }]
-        quant_state["source_metrics_updated_at"] = strategy_now().strftime("%Y-%m-%d %H:%M:%S")
-        quant_state["source_metrics_error"] = reason
-        _mark_market_error(quant_state, msg, reason, snapshot.source)
+        dcf_state["source_metrics_updated_at"] = strategy_now().strftime("%Y-%m-%d %H:%M:%S")
+        dcf_state["source_metrics_error"] = reason
+        _mark_market_error(dcf_state, msg, reason, snapshot.source)
         write_market_skip_snapshot(
-            name, symbol, quant_state, reason, level="ERROR",
+            name, symbol, dcf_state, reason, level="ERROR",
             current_price=current_price, last_known_price=last_valid_price,
             closes_count=len(closes), source=snapshot.source, last_bar_date=snapshot.last_bar_date,
             trade_allowed=False,
         )
-        return _maybe_strategy_history_alert(quant_state, msg, reason)
+        return _maybe_strategy_history_alert(dcf_state, msg, reason)
 
     strategy_source = _display_source_name(strategy_calc.get("strategy_source") or strategy_calc.get("strategy_source_key") or _strategy_source_for_symbol(symbol))
     if bool(strategy_calc.get("strategy_source_fallback")):
@@ -2555,7 +2527,7 @@ def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", re
     base_k150 = _safe_float(strategy_calc.get("k150"), float(cfg.get("k150", 1.0)))
     strategy_history_count = _safe_int(strategy_calc.get("history_count", 0), len(closes))
     strategy_key = _strategy_calc_cache_key(symbol, strategy_source, strategy_calc.get("last_bar_date") or getattr(snapshot, "last_bar_date", ""), ma_short_len, cfg)
-    quant_state["strategy_calc_cache"] = {
+    dcf_state["strategy_calc_cache"] = {
         "key": strategy_key,
         "symbol": symbol,
         "strategy_source": strategy_source,
@@ -2573,55 +2545,55 @@ def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", re
         "strategy_source_attempts": strategy_calc.get("attempts") or strategy_calc.get("strategy_source_attempts") or [],
         "updated_at": strategy_calc.get("updated_at") or strategy_now().strftime("%Y-%m-%d %H:%M:%S"),
     }
-    quant_state["strategy_source_attempts"] = quant_state["strategy_calc_cache"].get("strategy_source_attempts", [])
+    dcf_state["strategy_source_attempts"] = dcf_state["strategy_calc_cache"].get("strategy_source_attempts", [])
     if ma150_source and ma150_source != "f":
         strategy_status = "WARN"
-        quant_state["strategy_level"] = "WARN"
-        quant_state["strategy_error"] = f"策略数据为非完整口径: MA150来源={ma150_source}"
+        dcf_state["strategy_level"] = "WARN"
+        dcf_state["strategy_error"] = f"策略数据为非完整口径: MA150来源={ma150_source}"
     else:
         strategy_status = "OK"
-        quant_state["strategy_level"] = "INFO"
-        quant_state["strategy_error"] = ""
-    quant_state["strategy_source"] = strategy_source
-    quant_state["strategy_status"] = strategy_status
-    quant_state["strategy_calc_key"] = strategy_key
-    quant_state["strategy_calc_updated_at"] = quant_state.get("strategy_calc_cache", {}).get("updated_at", strategy_now().strftime("%Y-%m-%d %H:%M:%S"))
-    quant_state["ma_short"] = ma150
-    quant_state["k150"] = base_k150
-    quant_state["dynamic_k150"] = dynamic_k150
-    quant_state["sideways_score"] = sideways_score
-    quant_state["last_price"] = current_price
-    _mark_market_ok(quant_state, snapshot)
-    quant_state["market_source"] = _display_source_name(snapshot.source)
-    quant_state["last_valid_market_source"] = _display_source_name(snapshot.source)
-    quant_state["strategy_source"] = strategy_source
-    quant_state["strategy_status"] = strategy_status
-    quant_state["current_units"] = current_units
-    quant_state["avg_cost"] = current_avg_cost
-    quant_state["ma_short_source"] = ma150_source
-    quant_state["source_metrics"] = [_source_metric_from_strategy_state(symbol, cfg, quant_state)]
-    quant_state["source_metrics_updated_at"] = quant_state.get("strategy_calc_updated_at")
-    quant_state["source_metrics_error"] = quant_state.get("strategy_error", "")
-    quant_state["position_mode"] = position_mode
+        dcf_state["strategy_level"] = "INFO"
+        dcf_state["strategy_error"] = ""
+    dcf_state["strategy_source"] = strategy_source
+    dcf_state["strategy_status"] = strategy_status
+    dcf_state["strategy_calc_key"] = strategy_key
+    dcf_state["strategy_calc_updated_at"] = dcf_state.get("strategy_calc_cache", {}).get("updated_at", strategy_now().strftime("%Y-%m-%d %H:%M:%S"))
+    dcf_state["ma_short"] = ma150
+    dcf_state["k150"] = base_k150
+    dcf_state["dynamic_k150"] = dynamic_k150
+    dcf_state["sideways_score"] = sideways_score
+    dcf_state["last_price"] = current_price
+    _mark_market_ok(dcf_state, snapshot)
+    dcf_state["market_source"] = _display_source_name(snapshot.source)
+    dcf_state["last_valid_market_source"] = _display_source_name(snapshot.source)
+    dcf_state["strategy_source"] = strategy_source
+    dcf_state["strategy_status"] = strategy_status
+    dcf_state["current_units"] = current_units
+    dcf_state["avg_cost"] = current_avg_cost
+    dcf_state["ma_short_source"] = ma150_source
+    dcf_state["source_metrics"] = [_source_metric_from_strategy_state(symbol, cfg, dcf_state)]
+    dcf_state["source_metrics_updated_at"] = dcf_state.get("strategy_calc_updated_at")
+    dcf_state["source_metrics_error"] = dcf_state.get("strategy_error", "")
+    dcf_state["position_mode"] = position_mode
     if current_units > 0 and current_avg_cost == 0:
         current_avg_cost = current_price
-        quant_state["avg_cost"] = current_avg_cost
+        dcf_state["avg_cost"] = current_avg_cost
     zone = get_zone(current_price, ma150, cfg)
     now_str = strategy_now().strftime("%Y.%m.%d.%H:%M")
-    quant_state["last_time"] = now_str
+    dcf_state["last_time"] = now_str
     sell_price = ma150 * get_trend_multiple(cfg)
     clear_price = ma150 * get_sell_multiple(cfg)
     # Clear区周期规则：首次进入 CLEAR_ZONE 时锁定本轮第0步锚点；
     # 回到 TREND/BOX 不重置，后续再次进入 CLEAR 继续沿用旧步数与旧锚点；
     # 只有重新进入 CHANCE_ZONE，才说明高位周期结束，重置 Clear 清底仓状态。
     if zone == "CLEAR_ZONE":
-        if not quant_state.get("clear_anchor_price") or _safe_float(quant_state.get("clear_anchor_price"), 0.0) <= 0:
-            quant_state["clear_anchor_price"] = clear_price
-            quant_state["clear_step"] = 0
+        if not dcf_state.get("clear_anchor_price") or _safe_float(dcf_state.get("clear_anchor_price"), 0.0) <= 0:
+            dcf_state["clear_anchor_price"] = clear_price
+            dcf_state["clear_step"] = 0
     elif zone == "CHANCE_ZONE":
-        if quant_state.get("clear_anchor_price") is not None or int(quant_state.get("clear_step", 0) or 0) != 0:
-            quant_state["clear_anchor_price"] = None
-            quant_state["clear_step"] = 0
+        if dcf_state.get("clear_anchor_price") is not None or int(dcf_state.get("clear_step", 0) or 0) != 0:
+            dcf_state["clear_anchor_price"] = None
+            dcf_state["clear_step"] = 0
     def _pct_text(value):
         return format_percent_ratio(value, digits=2)
 
@@ -2644,10 +2616,10 @@ def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", re
             if pyramid_mode == "yes":
                 pyramid_status = "已开启"
             elif pyramid_mode == "auto":
-                pyramid_status = "已触发" if bool(quant_state.get("pyramid_add_active", False)) else "auto待触发"
+                pyramid_status = "已触发" if bool(dcf_state.get("pyramid_add_active", False)) else "auto待触发"
             else:
                 pyramid_status = "未开启"
-            cur_step = int(quant_state.get("pyramid_step", 0) or 0)
+            cur_step = int(dcf_state.get("pyramid_step", 0) or 0)
             step_pct = get_pyramid_add_step(cfg)
             lines.append(f"🧱机会倒金字塔: {pyramid_status}，加仓{cur_step}/{total_add_pyramid_steps}步，步长{_pct_text(step_pct)}")
         elif zone == "TREND_ZONE":
@@ -2663,8 +2635,8 @@ def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", re
             if total_clear_pyramid_steps > 0:
                 sell_plan = sell_plan[:total_clear_pyramid_steps]
             total_steps = len(sell_plan)
-            cur_clear_step = int(quant_state.get("clear_step", 0) or 0)
-            target_clear_step = get_clear_pyramid_target_step(current_price, quant_state.get("clear_anchor_price") or clear_price, cfg, total_steps)
+            cur_clear_step = int(dcf_state.get("clear_step", 0) or 0)
+            target_clear_step = get_clear_pyramid_target_step(current_price, dcf_state.get("clear_anchor_price") or clear_price, cfg, total_steps)
             clear_step_pct = _safe_float(cfg.get("clear_zone_step_percent", 0.08), 0.08)
             lines.append(f"🧹Clear倒金字塔: 已卖{cur_clear_step}/{total_steps}步，目标{target_clear_step}步，步长{_pct_text(clear_step_pct)}")
 
@@ -2673,8 +2645,8 @@ def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", re
 
     extra_info_full = _build_zone_extra_info()
     market_line = f"📡行情源: {_display_source_name(snapshot.source)}，数据状态: OK。"
-    strategy_level_for_msg = str(quant_state.get("strategy_level") or ("WARN" if strategy_status == "WARN" else "INFO")).upper()
-    strategy_issue = _short_strategy_issue(strategy_level_for_msg, quant_state.get("strategy_error", ""), ma150_source)
+    strategy_level_for_msg = str(dcf_state.get("strategy_level") or ("WARN" if strategy_status == "WARN" else "INFO")).upper()
+    strategy_issue = _short_strategy_issue(strategy_level_for_msg, dcf_state.get("strategy_error", ""), ma150_source)
     strategy_line = f"🧭策略源: {strategy_source}，数据状态: {strategy_status}{('，' + strategy_issue) if strategy_issue else ''}。"
     extra_info_full = (extra_info_full + "\n" if extra_info_full else "") + market_line + "\n" + strategy_line
     status_suffix = f"\n🚦策略运行状态: {strategy_run.upper()}"
@@ -2689,16 +2661,16 @@ def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", re
     )
     status_msg = _apply_strategy_alert_to_message(status_msg, strategy_level_for_msg, strategy_issue)
     logging.info(status_msg + "\n")
-    quant_state["last_status_msg"] = status_msg
-    quant_state["status_updated_at"] = strategy_now().strftime("%Y-%m-%d %H:%M:%S")
+    dcf_state["last_status_msg"] = status_msg
+    dcf_state["status_updated_at"] = strategy_now().strftime("%Y-%m-%d %H:%M:%S")
     units_before_decision = current_units
     avg_cost_before_decision = current_avg_cost
     if not allow_trade:
         # Web 手动刷新只更新页面状态，不写入策略快照。
         # 否则 REFRESH_ONLY / “Web手动刷新，仅更新状态” 会覆盖最近一次真实
         # 策略判断，导致状态页看不到交易时段内的动态 NO_TRADE/TRADE 原因。
-        quant_state["last_refresh_only_at"] = strategy_now().strftime("%Y-%m-%d %H:%M:%S")
-        quant_state["last_refresh_only_reason"] = refresh_reason or "manual refresh; monitor only"
+        dcf_state["last_refresh_only_at"] = strategy_now().strftime("%Y-%m-%d %H:%M:%S")
+        dcf_state["last_refresh_only_reason"] = refresh_reason or "manual refresh; monitor only"
         return []
     if strategy_run == "off":
         write_strategy_snapshot({
@@ -2715,8 +2687,8 @@ def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", re
             "avg_cost_before": avg_cost_before_decision, "avg_cost_after": current_avg_cost,
             "target_units": target_units, "limit_units": limit_units,
             "last_trade_price": last_trade_price, "last_trade_side": last_trade_side,
-            "last_add_price": quant_state.get("last_add_price"),
-            "pyramid_step": quant_state.get("pyramid_step"), "clear_step": quant_state.get("clear_step"),
+            "last_add_price": dcf_state.get("last_add_price"),
+            "pyramid_step": dcf_state.get("pyramid_step"), "clear_step": dcf_state.get("clear_step"),
             "trade_allowed": False,
         })
         return []
@@ -2726,26 +2698,26 @@ def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", re
     dividend = 0.0
     split_ratio = 1.0
     # ========== 倒金字塔加仓相关状态 ==========
-    pyramid_step = quant_state.get("pyramid_step", 0)
-    clear_step = quant_state.get("clear_step", 0)
-    last_add_price = quant_state.get("last_add_price")
+    pyramid_step = dcf_state.get("pyramid_step", 0)
+    clear_step = dcf_state.get("clear_step", 0)
+    last_add_price = dcf_state.get("last_add_price")
     if last_add_price is None or last_add_price <= 0:
         last_add_price = current_price
-    pyramid_add_active = quant_state.get("pyramid_add_active", False)
-    target_reached_once = quant_state.get("target_reached_once", False)
+    pyramid_add_active = dcf_state.get("pyramid_add_active", False)
+    target_reached_once = dcf_state.get("target_reached_once", False)
 
     state_dict = {
         "current_units": current_units,
         "last_trade_price": last_trade_price,
         "last_add_price": last_add_price,
-        "pyramid_anchor_price": quant_state.get("pyramid_anchor_price"),
-        "pyramid_start_units": quant_state.get("pyramid_start_units"),
-        "pyramid_limit_units": quant_state.get("pyramid_limit_units"),
+        "pyramid_anchor_price": dcf_state.get("pyramid_anchor_price"),
+        "pyramid_start_units": dcf_state.get("pyramid_start_units"),
+        "pyramid_limit_units": dcf_state.get("pyramid_limit_units"),
         "pyramid_step": pyramid_step,
         "pyramid_add_active": pyramid_add_active,
         "target_reached_once": target_reached_once,
         "clear_step": clear_step,
-        "clear_anchor_price": quant_state.get("clear_anchor_price"),
+        "clear_anchor_price": dcf_state.get("clear_anchor_price"),
     }
 
     # ========== 加仓决策（统一由 strategy.py 决定） ==========
@@ -2765,7 +2737,7 @@ def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", re
     if add_qty > 0:
         new_avg_cost = calculate_new_avg_cost(current_units, current_avg_cost, add_qty, current_price)
         after_units = normalize_position_amount(current_units + add_qty, position_mode)
-        record_trade_state_backup(name, symbol, quant_state, cfg, {
+        record_trade_state_backup(name, symbol, dcf_state, cfg, {
             "side": "BUY", "reason": add_reason, "zone": zone,
             "price": current_price, "qty": add_qty,
             "pos_before": current_units, "pos_after": after_units,
@@ -2775,7 +2747,7 @@ def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", re
             "last_add_price_before": last_add_price,
         })
         log_trade(
-            quant_name=name, symbol=symbol, price=current_price, qty=add_qty, side="BUY",
+            dcf_name=name, symbol=symbol, price=current_price, qty=add_qty, side="BUY",
             reason=add_reason, zone=zone,
             pos_before=current_units, pos_after=after_units,
             avg_cost_before=current_avg_cost, avg_cost_after=new_avg_cost,
@@ -2787,17 +2759,17 @@ def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", re
         )
         current_units = after_units
         current_avg_cost = new_avg_cost
-        quant_state["current_units"] = current_units
-        quant_state["avg_cost"] = current_avg_cost
-        quant_state["last_trade_price"] = current_price
-        quant_state["last_trade_side"] = "buy"
-        quant_state["pyramid_step"] = add_state.get("pyramid_step", pyramid_step)
-        quant_state["last_add_price"] = add_state.get("last_add_price", last_add_price)
-        quant_state["pyramid_anchor_price"] = add_state.get("pyramid_anchor_price", quant_state.get("pyramid_anchor_price"))
-        quant_state["pyramid_start_units"] = add_state.get("pyramid_start_units", quant_state.get("pyramid_start_units"))
-        quant_state["pyramid_limit_units"] = add_state.get("pyramid_limit_units", quant_state.get("pyramid_limit_units"))
-        quant_state["target_reached_once"] = add_state.get("target_reached_once", target_reached_once)
-        quant_state["pyramid_add_active"] = add_state.get("pyramid_add_active", pyramid_add_active)
+        dcf_state["current_units"] = current_units
+        dcf_state["avg_cost"] = current_avg_cost
+        dcf_state["last_trade_price"] = current_price
+        dcf_state["last_trade_side"] = "buy"
+        dcf_state["pyramid_step"] = add_state.get("pyramid_step", pyramid_step)
+        dcf_state["last_add_price"] = add_state.get("last_add_price", last_add_price)
+        dcf_state["pyramid_anchor_price"] = add_state.get("pyramid_anchor_price", dcf_state.get("pyramid_anchor_price"))
+        dcf_state["pyramid_start_units"] = add_state.get("pyramid_start_units", dcf_state.get("pyramid_start_units"))
+        dcf_state["pyramid_limit_units"] = add_state.get("pyramid_limit_units", dcf_state.get("pyramid_limit_units"))
+        dcf_state["target_reached_once"] = add_state.get("target_reached_once", target_reached_once)
+        dcf_state["pyramid_add_active"] = add_state.get("pyramid_add_active", pyramid_add_active)
         persist_runtime_position_to_config(name, current_units, current_avg_cost)
         extra_info = f"🏛{add_reason}: {format_units_for_display(add_qty, position_mode)}\n⏳动态K={dynamic_k150:.3f}，横盘评分={sideways_score:.2f}"
         trade_msg = build_trade_message(
@@ -2818,10 +2790,10 @@ def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", re
     # 这能保证中途加入标的后，后续继续以 MA150 第0步和已追认步数推进。
     for _k in ("pyramid_step", "last_add_price", "pyramid_anchor_price", "pyramid_start_units", "pyramid_limit_units", "pyramid_add_active", "target_reached_once"):
         if _k in add_state:
-            quant_state[_k] = add_state.get(_k)
-    pyramid_step = quant_state.get("pyramid_step", pyramid_step)
-    clear_step = quant_state.get("clear_step", clear_step)
-    last_add_price = quant_state.get("last_add_price", last_add_price)
+            dcf_state[_k] = add_state.get(_k)
+    pyramid_step = dcf_state.get("pyramid_step", pyramid_step)
+    clear_step = dcf_state.get("clear_step", clear_step)
+    last_add_price = dcf_state.get("last_add_price", last_add_price)
 
     # ========== 卖出决策 ==========
     if zone == "TREND_ZONE":
@@ -2830,7 +2802,7 @@ def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", re
         )
         if sell_qty > 0:
             after_units = normalize_position_amount(current_units - sell_qty, position_mode)
-            record_trade_state_backup(name, symbol, quant_state, cfg, {
+            record_trade_state_backup(name, symbol, dcf_state, cfg, {
                 "side": "SELL", "reason": "TREND_ZONE_SELL", "zone": "TREND_ZONE",
                 "price": current_price, "qty": sell_qty,
                 "pos_before": current_units, "pos_after": after_units,
@@ -2840,7 +2812,7 @@ def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", re
                 "last_add_price_before": last_add_price,
             })
             log_trade(
-                quant_name=name, symbol=symbol, price=current_price, qty=sell_qty, side="SELL",
+                dcf_name=name, symbol=symbol, price=current_price, qty=sell_qty, side="SELL",
                 reason="TREND_ZONE_SELL", zone="TREND_ZONE",
                 pos_before=current_units, pos_after=after_units,
                 avg_cost_before=current_avg_cost, avg_cost_after=current_avg_cost,
@@ -2851,9 +2823,9 @@ def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", re
                 last_add_price_before=last_add_price,
             )
             current_units = after_units
-            quant_state["current_units"] = current_units
-            quant_state["last_trade_price"] = current_price
-            quant_state["last_trade_side"] = "sell"
+            dcf_state["current_units"] = current_units
+            dcf_state["last_trade_price"] = current_price
+            dcf_state["last_trade_side"] = "sell"
             last_trade_price = new_state.get("last_trade_price", last_trade_price)
             persist_runtime_position_to_config(name, current_units, current_avg_cost)
             extra_info = f"🎯趋势区卖出机动仓: {format_units_for_display(sell_qty, position_mode)}\n⏳动态K={dynamic_k150:.3f}，横盘评分={sideways_score:.2f}"
@@ -2886,7 +2858,7 @@ def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", re
                     clear_step = step
                     continue
                 after_units = normalize_position_amount(current_units - sell_units, position_mode)
-                record_trade_state_backup(name, symbol, quant_state, cfg, {
+                record_trade_state_backup(name, symbol, dcf_state, cfg, {
                     "side": "SELL", "reason": f"CLEAR_ZONE_PYRAMID_STEP_{step}", "zone": "CLEAR_ZONE",
                     "price": current_price, "qty": sell_units,
                     "pos_before": current_units, "pos_after": after_units,
@@ -2898,7 +2870,7 @@ def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", re
                     "clear_step_after": step,
                 })
                 log_trade(
-                    quant_name=name, symbol=symbol, price=current_price, qty=sell_units, side="SELL",
+                    dcf_name=name, symbol=symbol, price=current_price, qty=sell_units, side="SELL",
                     reason=f"CLEAR_ZONE_PYRAMID_STEP_{step}", zone="CLEAR_ZONE",
                     pos_before=current_units, pos_after=after_units,
                     avg_cost_before=current_avg_cost, avg_cost_after=current_avg_cost,
@@ -2909,11 +2881,11 @@ def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", re
                     last_add_price_before=last_add_price,
                 )
                 current_units = after_units
-                quant_state["current_units"] = current_units
-                quant_state["last_trade_price"] = current_price
-                quant_state["last_trade_side"] = "sell"
+                dcf_state["current_units"] = current_units
+                dcf_state["last_trade_price"] = current_price
+                dcf_state["last_trade_side"] = "sell"
                 clear_step = step
-                quant_state["clear_step"] = clear_step
+                dcf_state["clear_step"] = clear_step
                 persist_runtime_position_to_config(name, current_units, current_avg_cost)
                 extra_info = f"🧹Clear区倒金字塔清底仓: 第{step}步 ({step_info['weight_percent']:.1f}%)\n{format_units_for_display(sell_units, position_mode)}\n⏳动态K={dynamic_k150:.3f}，横盘评分={sideways_score:.2f}"
                 trade_msg = build_trade_message(
@@ -2939,7 +2911,7 @@ def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", re
         reason = "; ".join([line.split("🗞交易:", 1)[-1].strip() for line in messages if "🗞交易:" in line])
     else:
         reason = build_no_trade_reason(
-            zone, cfg, quant_state, state_dict, current_price, ma150, current_units,
+            zone, cfg, dcf_state, state_dict, current_price, ma150, current_units,
             base_units, target_units, limit_units, position_mode, add_reason, add_qty,
             clear_step, last_trade_price
         )
@@ -2959,13 +2931,13 @@ def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", re
         "current_units_before": units_before_decision, "current_units_after": current_units,
         "avg_cost_before": avg_cost_before_decision, "avg_cost_after": current_avg_cost,
         "base_units": base_units, "target_units": target_units, "limit_units": limit_units,
-        "last_trade_price": quant_state.get("last_trade_price"),
-        "last_trade_side": quant_state.get("last_trade_side"),
-        "last_add_price": quant_state.get("last_add_price"),
-        "pyramid_step": quant_state.get("pyramid_step"),
-        "pyramid_add_active": quant_state.get("pyramid_add_active"),
-        "target_reached_once": quant_state.get("target_reached_once"),
-        "clear_step": quant_state.get("clear_step"),
+        "last_trade_price": dcf_state.get("last_trade_price"),
+        "last_trade_side": dcf_state.get("last_trade_side"),
+        "last_add_price": dcf_state.get("last_add_price"),
+        "pyramid_step": dcf_state.get("pyramid_step"),
+        "pyramid_add_active": dcf_state.get("pyramid_add_active"),
+        "target_reached_once": dcf_state.get("target_reached_once"),
+        "clear_step": dcf_state.get("clear_step"),
         "trade_allowed": True,
     })
     return messages
@@ -2973,7 +2945,7 @@ def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", re
 # ===========================
 # 日志清理函数
 # ===========================
-def clean_old_quant_logs(log_dir: str, keep: int = 7, filename_pattern: str = r"^quant\.(\d{8})\.log$"):
+def clean_old_dcf_logs(log_dir: str, keep: int = 7, filename_pattern: str = r"^dcf\.(\d{8})\.log$"):
     if keep <= 0:
         keep = 0
     if not os.path.isdir(log_dir):
@@ -3007,7 +2979,7 @@ def clean_old_quant_logs(log_dir: str, keep: int = 7, filename_pattern: str = r"
         for p in removed:
             logging.info(f"🗑️ 已删除旧日志: {os.path.basename(p)}")
     else:
-        logging.info("🧹 日志清理：未发现符合 quant.YYYYMMDD.log 格式的日志，无需清理")
+        logging.info("🧹 日志清理：未发现符合 dcf.YYYYMMDD.log 格式的日志，无需清理")
     return kept, removed
 
 # ===========================
@@ -3015,10 +2987,10 @@ def clean_old_quant_logs(log_dir: str, keep: int = 7, filename_pattern: str = r"
 # ===========================
 def main_loop():
     logging.info("=" * 60)
-    logging.info("Quant策略启动完成")
+    logging.info("DCF策略启动完成")
     logging.info(f"当前时间: {strategy_now().strftime('%Y-%m-%d %H:%M:%S')}")
     logging.info("=" * 60)
-    config_path = os.path.join(BASE_DIR, "quant.yaml")
+    config_path = os.path.join(BASE_DIR, "dcf.yaml")
     global SYMBOL_CONFIG, STRATEGY, FULL_CONFIG
     SYMBOL_CONFIG, STRATEGY_from_conf, FULL_CONFIG = load_config(config_path)
     STRATEGY.update(STRATEGY_from_conf)
@@ -3026,13 +2998,18 @@ def main_loop():
     logging.info("📌 各标的策略运行状态:")
     for name, cfg in SYMBOL_CONFIG.items():
         if not isinstance(cfg, dict):
-            logging.error(f"配置项 {name} 不是字典，类型为 {type(cfg)}，已跳过。请检查 quant.yaml 格式。")
+            logging.error(f"配置项 {name} 不是字典，类型为 {type(cfg)}，已跳过。请检查 dcf.yaml 格式。")
             continue
         strategy_run = normalize_strategy_run_value(cfg.get("strategy_run", "on"), "on")
         status_icon = "🟢" if strategy_run == "on" else "🔴"
         logging.info(f" {status_icon} {name}: {strategy_run.upper()}")
     logging.info("=" * 60)
     state = load_state()
+    if "_meta" not in state:
+        state["_meta"] = {
+            "last_daily_push_date": None,
+            "last_log_rotate_date": None,
+        }
     last_config_reload_seq = _safe_int(state.get("_meta", {}).get("config_reload_seq", 0), 0)
     last_system_config_seq = _safe_int(state.get("_meta", {}).get("system_config_seq", 0), 0)
     while True:
@@ -3057,7 +3034,7 @@ def main_loop():
             if rotate_success:
                 log_dir = os.path.join(BASE_DIR, "log")
                 try:
-                    clean_old_quant_logs(log_dir=log_dir, keep=7)
+                    clean_old_dcf_logs(log_dir=log_dir, keep=7)
                 except Exception as e:
                     logging.exception(f"❌ 执行日志清理函数失败: {e}")
 
@@ -3075,7 +3052,7 @@ def main_loop():
                 logging.info(snapshot)
                 logging.info("=" * 60)
                 try:
-                    send_notification(snapshot, title="每日快照")
+                    send_notification(snapshot)
                     logging.info("✅ 每日快照推送成功")
                 except Exception as e:
                     logging.error(f"❌ 推送每日快照失败: {e}")
@@ -3086,7 +3063,7 @@ def main_loop():
 
                 logging.info("=" * 60)
                 logging.info("✅ 日志轮转与快照推送完成")
-                logging.info("🕒 下次轮转时间: 明天 08:00")
+                logging.info("🕒 下次轮转时间: 明天 09:00")
                 logging.info("=" * 60)
 
         # 非交易时段：严格按配置的交易时段工作。
@@ -3132,7 +3109,6 @@ def main_loop():
                     f"⏸️ 非交易时段，已恢复回滚点但跳过立即重跑 seq={restore_rerun_seq}，"
                     f"目标={','.join(restore_rerun_targets) or 'ALL'}。"
                 )
-
             sleep_until_next_loop_or_web_request(state, STRATEGY.get("loop_interval", 60))
             continue
 
@@ -3150,7 +3126,7 @@ def main_loop():
                 if not isinstance(_cfg, dict):
                     continue
                 try:
-                    msgs = strategy_for_quant(
+                    msgs = strategy_for_dcf(
                         _name, _cfg, state,
                         allow_trade=True,
                         refresh_reason="回滚后按当前价重新执行策略",
@@ -3178,11 +3154,8 @@ def main_loop():
                 logging.info("=" * 60)
                 logging.info(body)
                 try:
-                    trade_sent = send_notification(body)
-                    if trade_sent:
-                        logging.info("✅ 回滚后重跑交易推送成功")
-                    else:
-                        logging.error("❌ 回滚后重跑交易推送失败")
+                    send_notification(body)
+                    logging.info("✅ 回滚后重跑交易推送成功")
                 except Exception as e:
                     logging.error(f"❌ 回滚后重跑交易推送失败: {e}")
             if restore_error_msgs:
@@ -3226,7 +3199,7 @@ def main_loop():
                 logging.error(f"配置项 {name} 不是字典，类型为 {type(cfg)}，已跳过。")
                 continue
             try:
-                msgs = strategy_for_quant(
+                msgs = strategy_for_dcf(
                     name, cfg, state,
                     allow_trade=not force_refresh,
                     refresh_reason="Web手动刷新，仅更新状态",
@@ -3261,22 +3234,9 @@ def main_loop():
             logging.info("=" * 60)
             logging.info(body)
             try:
-                # 从第一条消息提取标题信息
-                first_msg = all_trade_msgs[0] if all_trade_msgs else ""
-                import re
-                symbol_match = re.search(r'【(.+?)】', first_msg)
-                trade_match = re.search(r'🗞交易: (.+?)(?:\n|$)', first_msg)
-
-                if symbol_match and trade_match:
-                    trade_title = f"🎯[TRADE]{symbol_match.group(0)} 🗞交易: {trade_match.group(1).strip()}"
-                else:
-                    trade_title = "🎯[TRADE]"
                 record_push_detail("trade", body)
-                trade_sent = send_notification(body, title=trade_title)
-                if trade_sent:
-                    logging.info("✅ 买卖信号推送成功")
-                else:
-                    logging.error("❌ 买卖信号推送失败")
+                send_notification(body)
+                logging.info("✅ 买卖信号推送成功")
             except Exception:
                 logging.exception("❌ 推送买卖信号失败")
             logging.info("=" * 60)
@@ -3290,11 +3250,8 @@ def main_loop():
             logging.info(body)
             try:
                 record_push_detail("market_error", body)
-                error_sent = send_notification(body)
-                if error_sent:
-                    logging.info("✅ 行情错误推送成功")
-                else:
-                    logging.error("❌ 行情错误推送失败")
+                send_notification(body)
+                logging.info("✅ 行情错误推送成功")
             except Exception:
                 logging.exception("❌ 推送行情错误失败")
             logging.info("=" * 60)
