@@ -719,7 +719,13 @@ start_quant() {
 stop_quant() {
     ensure_quant_dir
 
-    # 停止 systemd service
+    # 停止 quant-web
+    if ${SUDO} systemctl is-active --quiet quant-web 2>/dev/null; then
+        echo "正在停止 Web 管理端 (via systemd)..."
+        ${SUDO} systemctl stop quant-web
+    fi
+
+    # 停止 quant.py
     if ${SUDO} systemctl is-active --quiet quant.service 2>/dev/null; then
         echo "正在停止 quant.py (via systemd)..."
         ${SUDO} systemctl stop quant.service
@@ -889,14 +895,20 @@ cfg = {
 Path(os.environ["WEB_CONF_FILE"]).write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
 PY
 
-    if ! prepare_web_cert_for_domain "$domain"; then
-        echo "❌ Web 管理端证书准备失败，已停止配置。"
+    # 仅检测本地 Let's Encrypt 证书，不自动申请
+    echo "检测本地 Let's Encrypt 证书..."
+    if cert_files_exist "$domain" && cert_is_valid "$domain" && cert_key_matches "$domain"; then
+        cert_info="$(get_cert_paths "$domain")" || return 1
+        cert_name="$(echo "$cert_info" | cut -d'|' -f1)"
+        cert_file="$(echo "$cert_info" | cut -d'|' -f2)"
+        key_file="$(echo "$cert_info" | cut -d'|' -f3)"
+        echo "✅ 使用本地证书: $cert_name"
+        show_local_cert_info "$domain"
+    else
+        echo "❌ 未找到 $domain 的有效本地 Let's Encrypt 证书。"
+        echo "   请先通过其他方式申请好证书后再执行此配置。"
         return 1
     fi
-    cert_info="$(get_cert_paths "$domain")" || return 1
-    cert_name="$(echo "$cert_info" | cut -d'|' -f1)"
-    cert_file="$(echo "$cert_info" | cut -d'|' -f2)"
-    key_file="$(echo "$cert_info" | cut -d'|' -f3)"
 
     # 为 nginx 配置设置环境变量
     export QUANT_DOMAIN="$domain"
@@ -999,9 +1011,15 @@ EOF
 
     echo
     echo "✅ Web 管理端已配置完成"
-    echo "访问地址: https://$domain:$WEB_PUBLIC_PORT/login"
-    echo "证书来源: Let's Encrypt (/etc/letsencrypt/live/${cert_name})"
-    echo "⚠️  密码已明文保存，请务必同步修改 quant_web.py 中的登录验证逻辑（改为直接比对明文）"
+    echo "========================================"
+    echo "域名:          $domain"
+    echo "对外端口:      $WEB_PUBLIC_PORT (HTTPS)"
+    echo "内部端口:      $WEB_INTERNAL_PORT (gunicorn)"
+    echo "证书:          /etc/letsencrypt/live/${cert_name}"
+    echo "访问地址:      https://$domain:$WEB_PUBLIC_PORT"
+    echo "内网访问:      http://<内网IP>:$WEB_PUBLIC_PORT"
+    echo "管理账号:      $admin_user"
+    echo "========================================"
 }
 
 
@@ -1227,13 +1245,12 @@ show_menu() {
     echo -e "${C_DIM} （管理脚本目录：$SCRIPT_DIR）${C_RESET}"
     echo -e "${C_DIM} （运行文件目录：$DCF_DIR）${C_RESET}"
     echo -e "${C_CYAN}===============================${C_RESET}"
-    echo -e "${C_YELLOW}1)${C_RESET} 下载/更新项目与依赖"
-    echo -e "${C_RED}2)${C_RESET} 系统重启（quant.py + Web）"
+    echo -e "${C_YELLOW}1)${C_RESET} 安装依赖&系统"
+    echo -e "${C_RED}2)${C_RESET} 系统重启"
     echo -e "${C_RED}3)${C_RESET} 停止脚本"
     echo -e "${C_CYAN}4)${C_RESET} 查看运行状态"
     echo -e "${C_YELLOW}5)${C_RESET} 配置/安装网页端"
-    echo -e "${C_GREEN}6)${C_RESET} 域名设置（配置 HTTPS）"
-    echo -e "${C_RED}7)${C_RESET} 卸载程序"
+    echo -e "${C_GREEN}6)${C_RESET} 卸载程序"
     echo -e "${C_RED}0)${C_RESET} 退出"
     echo -e "${C_CYAN}===============================${C_RESET}"
 }
@@ -1249,7 +1266,7 @@ case "$choice" in
     3) stop_quant ;;
     4) show_status ;;
     5) configure_web_portal ;;
-    6) setup_domain_https ;;
+    6) uninstall_quant ;;
     7) uninstall_quant ;;
     0) exit 0 ;;
     *) echo "无效选项，请重新输入。" ;;
@@ -1257,168 +1274,3 @@ esac
 done
 
 
-setup_domain_https() {
-    echo -e "${C_CYAN}========== 域名与 HTTPS 设置 ==========${C_RESET}"
-    
-    # 安全处理未定义变量（set -u 环境下）
-    local DOMAIN=""
-    local PUBLIC_PORT=""
-    local INTERNAL_PORT=""
-    
-    # 读取当前配置
-    local cfg_file="$DCF_DIR/web_portal.json"
-    if [[ -f "$cfg_file" ]]; then
-        DOMAIN=$($VENV_DIR/bin/python -c "import json; print(json.load(open('$cfg_file')).get('domain', ''))" 2>/dev/null || echo "")
-        PUBLIC_PORT=$($VENV_DIR/bin/python -c "import json; print(json.load(open('$cfg_file')).get('public_port', ''))" 2>/dev/null || echo "")
-        INTERNAL_PORT=$($VENV_DIR/bin/python -c "import json; print(json.load(open('$cfg_file')).get('internal_port', ''))" 2>/dev/null || echo "")
-    fi
-    
-    if [[ -z "$DOMAIN" ]]; then
-        read -p "请输入域名（例如 xiany.de）: " DOMAIN
-    else
-        read -p "当前域名: $DOMAIN，确认请直接回车，修改请输入新域名: " new_domain
-        [[ -n "$new_domain" ]] && DOMAIN="$new_domain"
-    fi
-    
-    if [[ -z "$PUBLIC_PORT" ]]; then
-        read -p "请输入对外公开端口（默认 819）: " PUBLIC_PORT
-        PUBLIC_PORT=${PUBLIC_PORT:-819}
-    else
-        read -p "当前公开端口: $PUBLIC_PORT，确认直接回车，修改请输入新端口: " new_port
-        [[ -n "$new_port" ]] && PUBLIC_PORT="$new_port"
-    fi
-    
-    if [[ -z "$INTERNAL_PORT" ]]; then
-        INTERNAL_PORT=1819
-    fi
-    
-    echo -e "${C_GREEN}将配置域名: $DOMAIN，HTTPS 端口: $PUBLIC_PORT，后端端口: $INTERNAL_PORT${C_RESET}"
-    
-    # 检查 certbot
-    if ! command -v certbot &>/dev/null; then
-        echo -e "${C_YELLOW}正在安装 Certbot...${C_RESET}"
-        apt update && apt install -y certbot python3-certbot-nginx
-        if [[ $? -ne 0 ]]; then
-            echo -e "${C_RED}Certbot 安装失败，请手动安装后重试。${C_RESET}"
-            return 1
-        fi
-    fi
-    
-    # 临时配置 80 端口（用于验证）
-    local temp_nginx_conf="/etc/nginx/sites-available/temp_${DOMAIN}"
-    local temp_enabled="/etc/nginx/sites-enabled/temp_${DOMAIN}"
-    local need_cleanup=0
-    
-    if ! nginx -T 2>/dev/null | grep -q "server_name.*$DOMAIN"; then
-        echo -e "${C_YELLOW}当前 Nginx 未配置域名 $DOMAIN 的 HTTP 访问，将临时添加配置用于证书验证...${C_RESET}"
-        cat > "$temp_nginx_conf" <<EOF_TEMP
-server {
-    listen 80;
-    server_name $DOMAIN;
-    root /var/www/html;
-    location /.well-known/acme-challenge/ {
-        root /var/www/html;
-    }
-}
-EOF_TEMP
-        ln -sf "$temp_nginx_conf" "$temp_enabled"
-        nginx -t && systemctl reload nginx
-        need_cleanup=1
-    fi
-    
-    # 申请证书
-    echo -e "${C_GREEN}正在申请 SSL 证书...${C_RESET}"
-    mkdir -p /var/www/html/.well-known/acme-challenge
-    certbot certonly --webroot -w /var/www/html -d "$DOMAIN" \
-        --non-interactive --agree-tos --register-unsafely-without-email \
-        --keep-until-expiring
-    if [[ $? -ne 0 ]]; then
-        echo -e "${C_RED}证书申请失败，请检查域名解析是否正确（需指向本服务器 IP）以及 80 端口是否可访问。${C_RESET}"
-        [[ $need_cleanup -eq 1 ]] && rm -f "$temp_enabled" "$temp_nginx_conf" && systemctl reload nginx
-        return 1
-    fi
-    
-    # 清理临时配置
-    if [[ $need_cleanup -eq 1 ]]; then
-        rm -f "$temp_enabled" "$temp_nginx_conf"
-        systemctl reload nginx
-    fi
-    
-    # 证书路径
-    local cert_path="/etc/letsencrypt/live/$DOMAIN/fullchain.pem"
-    local key_path="/etc/letsencrypt/live/$DOMAIN/privkey.pem"
-    if [[ ! -f "$cert_path" ]]; then
-        echo -e "${C_RED}证书文件未找到，配置中止。${C_RESET}"
-        return 1
-    fi
-    
-    # 配置 Nginx HTTPS
-    local nginx_conf="/etc/nginx/sites-available/quant-${DOMAIN}-ssl"
-    local nginx_enabled="/etc/nginx/sites-enabled/quant-${DOMAIN}-ssl"
-    
-    cat > "$nginx_conf" <<EOF_SSL
-# HTTPS server block for $DOMAIN (port $PUBLIC_PORT)
-server {
-    listen $PUBLIC_PORT ssl;
-    server_name $DOMAIN;
-
-    ssl_certificate $cert_path;
-    ssl_certificate_key $key_path;
-    include /etc/letsencrypt/options-ssl-nginx.conf;
-    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
-
-    location / {
-        proxy_pass http://127.0.0.1:$INTERNAL_PORT;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-}
-
-# HTTP 跳转到 HTTPS
-server {
-    listen 80;
-    server_name $DOMAIN;
-    return 301 https://\$server_name:$PUBLIC_PORT\$request_uri;
-}
-EOF_SSL
-
-    if [[ "$PUBLIC_PORT" != "443" ]]; then
-        echo -e "${C_YELLOW}提示：您设置的 HTTPS 端口是 $PUBLIC_PORT，访问请使用 https://$DOMAIN:$PUBLIC_PORT${C_RESET}"
-        read -p "是否同时配置标准 443 端口（需要 443 未占用）？(y/N): " add_443
-        if [[ "$add_443" =~ ^[Yy]$ ]]; then
-            cat >> "$nginx_conf" <<EOF_443
-# Standard 443 port fallback
-server {
-    listen 443 ssl;
-    server_name $DOMAIN;
-    ssl_certificate $cert_path;
-    ssl_certificate_key $key_path;
-    include /etc/letsencrypt/options-ssl-nginx.conf;
-    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
-    location / {
-        proxy_pass http://127.0.0.1:$INTERNAL_PORT;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-}
-EOF_443
-        fi
-    fi
-
-    ln -sf "$nginx_conf" "$nginx_enabled"
-    nginx -t
-    if [[ $? -ne 0 ]]; then
-        echo -e "${C_RED}Nginx 配置文件语法错误，已取消启用。请手动检查 $nginx_conf${C_RESET}"
-        rm -f "$nginx_enabled"
-        return 1
-    fi
-    
-    systemctl reload nginx
-    echo -e "${C_GREEN}✅ HTTPS 配置成功！${C_RESET}"
-    echo -e "访问地址：${C_BOLD}https://$DOMAIN:$PUBLIC_PORT${C_RESET}"
-    echo -e "证书自动续期任务已由 Certbot 定时服务管理（检查：systemctl status certbot.timer）"
-}
