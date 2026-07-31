@@ -342,7 +342,7 @@ def _encode_http_header_value(value: Any) -> str:
         text.encode("latin-1")
         return text
     except UnicodeEncodeError:
-        return Header(text, "utf-8").encode()
+        return Header(text, "utf-8").encode().replace("\n ", " ").replace("\n", "")
 
 
 def _send_ntfy_detail(msg: str, cfg: Dict[str, str], title: str = "Quant 推送") -> Tuple[bool, str]:

@@ -1344,7 +1344,7 @@ body:not(.theme-x3-dark) .panel-toggle input:checked + .panel-toggle-slider{back
     <div class="topbar-right">
       <label class="strategy-switch" title="策略运行开关">
         <span class="strategy-switch-label">策略</span>
-        <input id="STRATEGY_loop_enabled" name="loop_enabled" value="yes" type="checkbox" {% if strategy_settings.get('loop_enabled', 'yes') == 'yes' %}checked{% endif %} onchange="submitStrategyEnabledToggle(this)">
+        <input id="STRATEGY_loop_enabled" name="loop_enabled" value="yes" type="checkbox" {% if (strategy_settings.get('loop_enabled', 'yes')|string|lower) in ('yes', 'true', '1', 'on') %}checked{% endif %} onchange="submitStrategyEnabledToggle(this)">
         <span class="strategy-slider"></span>
       </label>
       <input type="hidden" name="loop_enabled" value="no">
@@ -1453,7 +1453,7 @@ body:not(.theme-x3-dark) .panel-toggle input:checked + .panel-toggle-slider{back
             {% endfor %}
           </div>
         {% else %}
-          <p class="section-note">点击“刷新”计算当前数据源指标。</p>
+          <p class="section-note">点击"刷新"计算当前数据源指标。</p>
         {% endif %}
       </section>
 
@@ -1686,35 +1686,7 @@ body:not(.theme-x3-dark) .panel-toggle input:checked + .panel-toggle-slider{back
           </div>
           <div class="inline-actions backtest-run-actions">
             <button type="submit" class="primary-btn action-btn">执行回测</button>
-            <button type="button" class="backtest-run-help-btn return-help-style" aria-label="收益计算说明" title="收益计算说明" onclick="toggleReturnCalcHelp()">?</button>
-          </div>
-          <div id="return-calc-help" class="return-help-panel hidden" role="note" aria-label="收益计算说明">
-            <h3>回测收益计算口径</h3>
-            <h4>价格和参数选用</h4>
-            <ul>
-              <li>信号、MA150、区间判断使用复权价 <code>Adj Close</code>。</li>
-              <li>成交、估值、成本、最新价格和收益计算使用原始价 <code>Close</code>。</li>
-              <li>百分比模式下，<code>qty / units</code> 表示仓位比例或成本权重，不是股数。</li>
-              <li>历史回测初始成本默认使用回测窗口第一天原始价；在配置中设置 <code>initial_avg_cost</code> 可指定真实建仓成本，否则收益率会随回测起始日变化。<code>current_avg_cost</code> 只用于实盘监控。</li>
-              <li>峰值净投入仓位 = 回测期内“已买入但尚未卖出”的仓位所达到的最高值；买入时增加，卖出时按当时持仓成本冲减，同一笔资金反复来回做不会重复计入。</li>
-            </ul>
-            <h4>收益率计算</h4>
-            <ul>
-              <li>分红收益率 = 分红现金贡献 ÷ 峰值净投入仓位；分红按除息日、按当时持仓比例入账，单独统计。</li>
-              <li>交易实现收益率 = 已实现卖出收益贡献 ÷ 峰值净投入仓位；卖出收益贡献 = 卖出仓位 × (卖出原始价 ÷ 当时持仓成本 - 1)。</li>
-              <li>持仓收益率 = 期末浮盈贡献 ÷ 峰值净投入仓位；期末浮盈贡献 = 期末市值权重 - 期末剩余持仓成本权重，不含分红和已实现收益摊薄。</li>
-              <li>综合收益率 = 分红收益率 + 交易实现收益率 + 持仓收益率 = 总收益贡献 ÷ 峰值净投入仓位。</li>
-              <li>期末持仓收益率 = 最新价格 ÷ 原始持仓成本 - 1，不扣分红和已实现收益，避免与上面两项重复计算。</li>
-              <li>摊薄持仓收益率 = 最新价格 ÷ 摊薄后持仓成本 - 1，摊薄后持仓成本把整个回测期的分红现金贡献和已实现交易收益贡献摊回持仓成本。该口径与分红收益率、交易实现收益率重叠，仅作参考展示，不计入综合收益率；成本被完全覆盖时允许按负成本展示。</li>
-              <li>收益率均不扣手续费。</li>
-              <li>总权益(参考) = 期末总权益 ÷ 起始总权益 - 1，是含现金的账户口径，分母是全部本金，与综合收益率不是同一个基准，数值偏小属正常。</li>
-            </ul>
-            <h4>除权息数据</h4>
-            <ul>
-              <li>腾讯A股/ETF日K、新浪A股/ETF日K、腾讯港股日K、Yahoo港股日K 这四个源本身不返回分红和拆股，直接用会导致分红收益率恒为 0。</li>
-              <li>回测会自动从 <code>BaoStock A股含权息</code>（A股）或 <code>Yahoo港股含权息</code>（港股）按交易日补齐分红和拆股事件，除息日落在非交易日时顺延到下一个交易日。</li>
-              <li>报告中的“除权息数据来源”显示补齐结果：<code>ok</code>=已补齐，<code>native</code>=数据源自带，<code>empty</code>=区间内确实没有分红，<code>failed</code>/<code>no_data</code>=补齐失败，此时分红收益率为 0，可在系统配置里把回测源直接改成含权息源。</li>
-            </ul>
+            <button type="button" class="backtest-run-help-btn return-help-style" aria-label="策略与收益说明" title="策略与收益说明" onclick="toggleBacktestHelp()">?</button>
           </div>
         </form>
 
@@ -2024,10 +1996,6 @@ body:not(.theme-x3-dark) .panel-toggle input:checked + .panel-toggle-slider{back
     }
     function toggleBacktestHelp(){
       const panel = document.getElementById('backtest-help');
-      if(panel){ panel.classList.toggle('hidden'); }
-    }
-    function toggleReturnCalcHelp(){
-      const panel = document.getElementById('return-calc-help');
       if(panel){ panel.classList.toggle('hidden'); }
     }
 

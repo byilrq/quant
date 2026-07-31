@@ -47,6 +47,7 @@ from push import (
     write_push_config,
     read_push_logs,
     send_push_test,
+    send_notification,
 )
 
 try:
@@ -129,28 +130,40 @@ PARAM_HELP: Dict[str, str] = {
 }
 
 BACKTEST_HELP_TEXT = """1) 价格口径：信号和区间使用 Adj Close；成交、估值、持仓成本使用 Close；分红按除息日现金入账，拆股按除权日调整仓位和成本。
-2) 区间划分：CHANCE=价格<MA150；BOX=MA150~MA150*trend_multiple；TREND=MA150*trend_multiple~MA150*sell_multiple；CLEAR=价格≥MA150*sell_multiple。
-3) 倒金字塔加仓：历史回测每次都从 pyramid_add_enabled=auto 起步，忽略 quant.yaml 中实盘监控用的 yes；只有首次进入 CHANCE_ZONE 后才自动切到 yes。
-4) 箱体区规则：回测起步在 BOX_ZONE 时不会因实盘 yes 直接补仓；只有已由 CHANCE_ZONE 激活的倒金字塔模式，才可在 CHANCE/BOX 中继续按步长加仓。
-5) 趋势/离场卖出：TREND_ZONE 只卖出高于 base_units 的机动仓；CLEAR_ZONE 按 clear_zone_step_percent 推进倒金字塔清底仓。
-6) 回测成本：回测页面的“初始仓位”是临时参数，只代表回测窗口第一交易日 current_units，默认 5%；它不覆盖策略里的 base_units / target_units / limit_target。初始成本默认取回测窗口第一天 Close，可用配置 initial_avg_cost 指定真实建仓成本。current_avg_cost 仅用于实盘监控。
-7) 收益口径（当前算法）：
-   · 峰值净投入 = 回测期内“已买入但尚未卖出”的仓位所达到的最高值。起始底仓计入，买入时增加，卖出时按当时持仓成本冲减，清仓归零，只取历史最大值。同一笔资金反复来回做不会重复计入分母。
-   · 分红收益率 = 累计分红现金贡献 ÷ 峰值净投入。分红在除息日按当时持仓比例入账，单独统计。
-   · 交易实现收益率 = 累计已实现卖出收益 ÷ 峰值净投入。单笔已实现收益 = 卖出仓位 ×(卖出原始价 ÷ 当时持仓成本 - 1)。
-   · 持仓收益率 = 期末浮盈 ÷ 峰值净投入。期末浮盈按原始持仓成本计算，不扣分红和已实现收益。
-   · 综合收益率 = 分红收益率 + 交易实现收益率 + 持仓收益率，三项互不重叠。
-   · 期末持仓收益率 = 最新价格 ÷ 原始持仓成本 - 1，只看期末仍持有的仓位。
-   · 摊薄持仓收益率 = 最新价格 ÷ 摊薄后持仓成本 - 1，摊薄成本把全周期分红和已实现收益摊回成本。该口径与上面几项重叠，仅参考展示，不计入综合收益率。
-   · 所有收益率均不扣手续费；总权益(参考) = 期末总权益 ÷ 起始总权益 - 1，是含现金的账户口径，与综合收益率不是同一个分母。
-8) 除权息数据：腾讯/新浪日K源本身不带分红拆股，回测会自动从 BaoStock A股含权息 / Yahoo港股含权息 补齐，报告中的“除权息数据来源”显示实际结果（ok=已补齐，failed/no_data=补齐失败，此时分红收益率为 0）。
+
+2) 区间划分：
+   CHANCE（机会区）= 价格 < MA150
+   BOX（箱体区）= MA150 ~ MA150 × trend_multiple
+   TREND（趋势区）= MA150 × trend_multiple ~ MA150 × sell_multiple
+   CLEAR（清仓区）= 价格 ≥ MA150 × sell_multiple
+
+3) 机会区倒金字塔加仓：MA150 使用动态 K150 系数修正（横盘时降低 MA150，避免机会区过窄）。首次进入 CHANCE 后自动激活倒金字塔模式，按 pyramid_add_step 步长分步加仓。每步加仓量 = (极限仓位 - 底仓) × 对应权重，步数用完或仓位到极限后停止加仓。机会区不主动卖出。
+
+4) 箱体区：不主动买卖，持仓等于目标仓位时维持不动。仓位低于目标需等跌破 MA150 进入机会区才补仓，仓位高于目标需等涨到 trend_multiple 进入趋势区才卖出。
+
+5) 趋势/离场卖出：TREND 区只卖出高于 base_units 的机动仓，按 trend_zone_step_percent 步长推进，每次卖出 trend_zone_sell_percent 的机动仓。CLEAR 区按 clear_pyramid_weights 权重分步清底仓，每步触发价 = 锚定价 × (1 + clear_zone_step_percent × 步数)，步数由 clear_pyramid_steps 控制。
+
+6) 回测参数：回测页面的"初始仓位"是临时参数，只代表回测第一交易日 current_units，默认 5%；不覆盖策略中的 base_units / target_units / limit_target。初始成本默认取回测第一天 Close，可用 initial_avg_cost 指定真实建仓成本。current_avg_cost 仅用于实盘监控。
+
+7) 收益口径：
+   峰值净投入 = 回测期内"已买入但尚未卖出"的仓位所达到的最高值。起始底仓计入，买入时增加，卖出时按当时持仓成本冲减，清仓归零，只取历史最大值。同一笔资金反复来回做不会重复计入分母。
+   分红收益率 = 累计分红现金贡献 ÷ 峰值净投入。分红在除息日按当时持仓比例入账，单独统计。
+   交易实现收益率 = 累计已实现卖出收益 ÷ 峰值净投入。单笔已实现收益 = 卖出仓位 × (卖出原始价 ÷ 当时持仓成本 - 1)。
+   持仓收益率 = 期末浮盈 ÷ 峰值净投入。期末浮盈按原始持仓成本计算，不扣分红和已实现收益。
+   综合收益率 = 分红收益率 + 交易实现收益率 + 持仓收益率，三项互不重叠。
+   期末持仓收益率 = 最新价格 ÷ 原始持仓成本 - 1，只看期末仍持有的仓位。
+   摊薄持仓收益率 = 最新价格 ÷ 摊薄后持仓成本 - 1，摊薄成本把全周期分红和已实现收益摊回成本。该口径与上面几项重叠，仅参考展示，不计入综合收益率。
+   所有收益率均不扣手续费；总权益(参考) = 期末总权益 ÷ 起始总权益 - 1，是含现金的账户口径，与综合收益率不是同一个分母。
+
+8) 除权息数据：腾讯/新浪日K源本身不带分红拆股，回测会自动从 BaoStock A股含权息 / Yahoo港股含权息 补齐，报告中的"除权息数据来源"显示实际结果（ok=已补齐，failed/no_data=补齐失败，此时分红收益率为 0）。
+
 9) 百分比模式下，qty 表示仓位比例；交易日志保留上一次成交价和上一次加仓价。"""
 
 BACKTEST_METRICS_HELP_TEXT = """期末持仓收益率：只看期末仍持有的仓位，公式为 最新价格 / 原始持仓成本 - 1。它不扣分红也不扣已实现收益，因为这两块已经作为独立的分红收益率、交易实现收益率单独统计，扣进成本会重复计算。
 
 摊薄持仓收益率：股票软件常见的摊薄成本口径，用整个回测期内累计的分红现金贡献 + 已实现交易收益贡献去扣减持仓成本，再算 最新价格 / 摊薄后持仓成本 - 1。它与分红收益率、交易实现收益率口径重叠，只作参考展示，不计入综合收益率。
 
-综合收益率：按峰值净投入口径计算，公式为 (分红收益贡献 + 交易实现收益贡献 + 期末持仓浮盈贡献) / 峰值净投入仓位。峰值净投入 = 回测期内“已投入但尚未卖出”的仓位所达到的最高值，买入时增加、卖出时按当时持仓成本冲减。同一笔资金反复来回做，不会重复计入分母，因此换手次数不再压低收益率。
+综合收益率：按峰值净投入口径计算，公式为 (分红收益贡献 + 交易实现收益贡献 + 期末持仓浮盈贡献) / 峰值净投入仓位。峰值净投入 = 回测期内"已投入但尚未卖出"的仓位所达到的最高值，买入时增加、卖出时按当时持仓成本冲减。同一笔资金反复来回做，不会重复计入分母，因此换手次数不再压低收益率。
 
 分红收益率单独计算：分红按除息日、按当时持仓比例入账，不与其它收益项重复。"""
 
@@ -442,7 +455,7 @@ DCF_NAV_STYLE = """
 
 STATUS_AUTO_REFRESH_STYLE = """
 <style id="quant-status-auto-refresh-style">
-/* 状态页刷新按钮与“回测/策略数据源指标”刷新按钮保持一致 */
+/* 状态页刷新按钮与"回测/策略数据源指标"刷新按钮保持一致 */
 form[action$="/refresh-status"] button,
 form[action$="/refresh-status"] input[type="submit"],
 form[action$="/refresh-source-metrics"] button,
@@ -504,7 +517,7 @@ STATUS_AUTO_REFRESH_SCRIPT = """
       });
     });
 
-    // 状态页下拉框自动提交，不显示额外“查看”按钮。
+    // 状态页下拉框自动提交，不显示额外"查看"按钮。
     if (window.location.pathname === "/status" || window.location.pathname === "/") {
       document.querySelectorAll('form[action$="/status"] button, form[action$="/status"] input[type="submit"]').forEach(function (el) {
         var text = (el.innerText || el.value || "").trim();
@@ -617,6 +630,16 @@ def normalize_strategy_config(strategy: Dict[str, Any]) -> bool:
     changed = False
     if not isinstance(strategy, dict):
         return changed
+    loop_val = strategy.get("loop_enabled", "yes")
+    if loop_val in (True, "yes", "on", "true", "1", 1):
+        new_loop = "yes"
+    elif loop_val in (False, "no", "off", "false", "0", 0):
+        new_loop = "no"
+    else:
+        new_loop = "yes"
+    if strategy.get("loop_enabled") != new_loop:
+        strategy["loop_enabled"] = new_loop
+        changed = True
     int_defaults = {
         "loop_interval": 60,
         "fetch_history_days": 400,
@@ -759,9 +782,8 @@ def _clone_yaml_plain(value):
 
 def write_yaml(data: Dict[str, Any]) -> None:
     normalize_config(data)
-    clean_data = _clone_yaml_plain(data)
     with CONFIG_FILE.open("w", encoding="utf-8") as f:
-        yaml.dump(clean_data, f)
+        yaml.dump(data, f)
 
 def read_state() -> Dict[str, Any]:
     if not STATE_FILE.exists():
@@ -1067,17 +1089,18 @@ def write_state(data: Dict[str, Any]) -> None:
     except Exception:
         pass
 
-def request_runtime_config_reload(selected: str, section: Dict[str, Any]) -> None:
+def request_runtime_config_reload(selected: str, section: Dict[str, Any] | None = None) -> None:
     """Notify quant.py to reload config and let edited position fields take effect.
 
     Only current_units/current_avg_cost are written into runtime state here. Trading
     anchors such as last_trade_price, last_add_price, pyramid_step and clear_step
     are intentionally preserved, so saving parameters does not behave like a manual reset.
+    When section is None (symbol deletion), no state entry is created.
     """
     state = read_state()
     if not isinstance(state, dict):
         state = {}
-    if selected != "COMMON_BACKTEST_CONFIG" and isinstance(section, dict):
+    if selected != "COMMON_BACKTEST_CONFIG" and isinstance(section, dict) and section:
         node = state.setdefault(selected, {})
         if isinstance(node, dict):
             mode = str(section.get("position_mode", node.get("position_mode", "percent")) or "percent").strip().lower()
@@ -1225,10 +1248,94 @@ def cleanup_deleted_symbol_state_backups(selected: str, symbol_code: str = "") -
     return removed
 
 
+def cleanup_deleted_symbol_trade_log(selected: str, symbol_code: str = "") -> int:
+    """Remove trade log rows for a deleted symbol."""
+    if not TRADE_LOG_FILE.exists():
+        return 0
+    removed = 0
+    try:
+        lines = TRADE_LOG_FILE.read_text(encoding="utf-8", errors="ignore").splitlines()
+        if not lines:
+            return 0
+        header = lines[0]
+        kept = [header]
+        for line in lines[1:]:
+            row = line.strip()
+            if not row:
+                continue
+            try:
+                parts = list(csv.reader([row]))[0]
+            except Exception:
+                kept.append(row)
+                continue
+            row_name = str(parts[1] if len(parts) > 1 else "").strip()
+            row_symbol = str(parts[2] if len(parts) > 2 else "").strip().upper()
+            if row_name == selected or (symbol_code and row_symbol == symbol_code):
+                removed += 1
+            else:
+                kept.append(row)
+        if removed:
+            TRADE_LOG_FILE.write_text("\n".join(kept) + "\n", encoding="utf-8")
+    except Exception:
+        pass
+    return removed
+
+
+def _safe_symbol_part(text: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", (text or "").strip().upper()) or "UNKNOWN"
+
+
+def cleanup_deleted_symbol_strategy_cache(selected: str, symbol_code: str = "") -> int:
+    """Delete strategy history cache files for a deleted symbol."""
+    removed = 0
+    try:
+        cache_dir = _strategy_history_cache_dir()
+        if not cache_dir.exists():
+            return removed
+        patterns = set()
+        for name in (selected, symbol_code):
+            safe = _safe_symbol_part(name)
+            if safe and safe != "UNKNOWN":
+                patterns.add(safe)
+        if not patterns:
+            return removed
+        for f in list(cache_dir.iterdir()):
+            if f.is_file() and any(f.name.startswith(p + "_") for p in patterns):
+                try:
+                    f.unlink()
+                    removed += 1
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return removed
+
+
+def cleanup_deleted_symbol_backtest_out(selected: str, symbol_code: str = "") -> int:
+    """Delete backtest output directory for a deleted symbol."""
+    removed = 0
+    try:
+        code = (symbol_code or "").strip().upper()
+        for candidate in (code, selected):
+            if not candidate:
+                continue
+            path = BACKTEST_OUT_DIR / candidate
+            if path.exists() and path.is_dir():
+                import shutil
+                shutil.rmtree(path)
+                removed += 1
+    except Exception:
+        pass
+    return removed
+
+
 def cleanup_deleted_symbol_runtime_files(selected: str, symbol_code: str = "") -> Dict[str, int]:
     return {
         "snapshots": cleanup_deleted_symbol_snapshots(selected, symbol_code),
         "state_backups": cleanup_deleted_symbol_state_backups(selected, symbol_code),
+        "trade_log": cleanup_deleted_symbol_trade_log(selected, symbol_code),
+        "strategy_cache": cleanup_deleted_symbol_strategy_cache(selected, symbol_code),
+        "backtest_out": cleanup_deleted_symbol_backtest_out(selected, symbol_code),
     }
 
 
@@ -2265,6 +2372,11 @@ def _convert_strategy_form_value(key: str, value: str) -> Any:
 
 def save_strategy_settings_from_form(config: Dict[str, Any]) -> Dict[str, Any]:
     strategy = dict(config.get("STRATEGY", {}) or {})
+    old_loop = str(strategy.get("loop_enabled", "yes") or "yes")
+    if old_loop.lower() in ("no", "off", "false", "0"):
+        old_loop_enabled = False
+    else:
+        old_loop_enabled = True
     for item in STRATEGY_FIELDS:
         key = item["key"]
         if key in request.form:
@@ -2280,6 +2392,18 @@ def save_strategy_settings_from_form(config: Dict[str, Any]) -> Dict[str, Any]:
     strategy["timezone"] = str(strategy.get("timezone", "Asia/Shanghai") or "Asia/Shanghai").strip()
     config["STRATEGY"] = strategy
     write_yaml(config)
+    new_loop = str(strategy.get("loop_enabled", "yes") or "yes")
+    if new_loop.lower() in ("no", "off", "false", "0"):
+        new_loop_enabled = False
+    else:
+        new_loop_enabled = True
+    if old_loop_enabled and not new_loop_enabled:
+        try:
+            push_title = "🔴 策略总开关已关闭"
+            push_body = f"策略总开关已手动关闭，时间：{current_time_text()}\n关闭后策略将继续刷新行情数据，但不会触发任何交易。"
+            send_notification(push_body, title=push_title)
+        except Exception:
+            pass
     # quant.py reloads quant.yaml every loop; nudge it so sleep wakes early.
     try:
         state = read_state()
@@ -3079,9 +3203,10 @@ def _handle_symbol_actions(config: Dict[str, Any], selected: str):
                 write_yaml(config)
                 delete_symbol_state(selected, symbol_code)
                 cleanup_stats = cleanup_deleted_symbol_runtime_files(selected, symbol_code)
-                request_runtime_config_reload("COMMON_BACKTEST_CONFIG", {})
+                request_runtime_config_reload(selected, None)
+                request_runtime_system_config_reload()
                 flash(
-                    f"已删除标的：{selected}，并清理运行状态、回滚点 {cleanup_stats.get('state_backups', 0)} 条、快照记录 {cleanup_stats.get('snapshots', 0)} 条。",
+                    f"已删除标的：{selected}，并清理运行状态、回滚点 {cleanup_stats.get('state_backups', 0)} 条、快照记录 {cleanup_stats.get('snapshots', 0)} 条、交易记录 {cleanup_stats.get('trade_log', 0)} 条、策略缓存 {cleanup_stats.get('strategy_cache', 0)} 条、回测数据 {cleanup_stats.get('backtest_out', 0)} 项。",
                     "success",
                 )
                 return redirect(url_for("status_page"))

@@ -465,14 +465,20 @@ def save_full_config(full_cfg, path=None):
     except ImportError:
         return False
     with open(target, "w", encoding="utf-8") as f:
-        yaml.safe_dump(full_cfg, f, allow_unicode=True, sort_keys=False)
+        yaml.dump(full_cfg, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
     return True
 
 def persist_runtime_position_to_config(name, current_units, avg_cost):
     global FULL_CONFIG, SYMBOL_CONFIG
-    if not isinstance(FULL_CONFIG, dict):
+    try:
+        _, _, disk_cfg = load_config(config_path)
+    except Exception:
+        disk_cfg = None
+    if not isinstance(disk_cfg, dict):
+        disk_cfg = FULL_CONFIG
+    if not isinstance(disk_cfg, dict):
         return False
-    symbol_cfg = FULL_CONFIG.setdefault("SYMBOL_CONFIG", {})
+    symbol_cfg = disk_cfg.setdefault("SYMBOL_CONFIG", {})
     if name not in symbol_cfg or not isinstance(symbol_cfg.get(name), dict):
         return False
     mode = get_position_mode(symbol_cfg[name])
@@ -480,7 +486,8 @@ def persist_runtime_position_to_config(name, current_units, avg_cost):
     symbol_cfg[name]["current_avg_cost"] = round(_safe_float(avg_cost, 0.0), 6) if _safe_float(avg_cost, 0.0) > 0 else 0.0
     SYMBOL_CONFIG[name]["current_units"] = symbol_cfg[name]["current_units"]
     SYMBOL_CONFIG[name]["current_avg_cost"] = symbol_cfg[name]["current_avg_cost"]
-    return save_full_config(FULL_CONFIG)
+    FULL_CONFIG = disk_cfg
+    return save_full_config(disk_cfg)
 
 FULL_CONFIG = {}
 STRATEGY = {
@@ -742,7 +749,7 @@ def apply_runtime_config_reload_if_needed(state, last_seen_seq):
     for name in target_names:
         old_entry = state.get(name, {}) if isinstance(state.get(name, {}), dict) else {}
         disk_entry = disk_state.get(name, {}) if isinstance(disk_state.get(name, {}), dict) else {}
-        if old_entry:
+        if old_entry and disk_entry:
             merged_entry = dict(old_entry)
         else:
             merged_entry = build_default_symbol_state(SYMBOL_CONFIG[name])
@@ -2241,7 +2248,8 @@ def build_no_trade_reason(zone, cfg, quant_state, state_dict, current_price, ma1
                 return (
                     "CHANCE_ZONE 未买入：未跌够倒金字塔加仓步长，"
                     f"当前价 {price_text(current_price)} > 触发价 {price_text(trigger)} "
-                    f"（上次加仓价 {price_text(last_add)}，步长 {pct(step_pct)}）。"
+                    f"（上次加仓价 {price_text(last_add)}，步长 {pct(step_pct)}，"
+                    f"待加仓第 {step + 1}/{total_steps} 步）。"
                 )
 
             weight = weights[step] if step < len(weights) else 0.0
@@ -2252,10 +2260,11 @@ def build_no_trade_reason(zone, cfg, quant_state, state_dict, current_price, ma1
             if planned <= POSITION_EPSILON or max_allowed <= POSITION_EPSILON:
                 return (
                     "CHANCE_ZONE 未买入：已到加仓价，但计划买入量不足，"
-                    f"本步计划 {units(planned)}，剩余空间 {units(max_allowed)}。"
+                    f"本步计划 {units(planned)}，剩余空间 {units(max_allowed)}"
+                    f"（加仓第 {step + 1}/{total_steps} 步）。"
                 )
 
-            return "CHANCE_ZONE 未买入：已接近买入条件，但本轮策略买入数量为 0。"
+            return f"CHANCE_ZONE 未买入：已接近买入条件，但本轮策略买入数量为 0（加仓第 {step + 1}/{total_steps} 步）。"
 
         if zone == "BOX_ZONE":
             chance_trigger = ma150 if ma150 and ma150 > 0 else 0.0
@@ -2305,13 +2314,20 @@ def build_no_trade_reason(zone, cfg, quant_state, state_dict, current_price, ma1
                 return (
                     "TREND_ZONE 未卖出：未涨够趋势区卖出步长，"
                     f"当前价 {price_text(current_price)} < 触发价 {price_text(trigger)} "
-                    f"（锚定价 {price_text(anchor)}，步长 {pct(step_pct)}）。"
+                    f"（锚定价 {price_text(anchor)}，步长 {pct(step_pct)}，"
+                    f"每次卖出 {pct(get_trend_zone_sell_percent(cfg))} 机动仓）。"
                 )
             sell_pct = get_trend_zone_sell_percent(cfg)
             planned = normalize_position_amount(min(excess, cu * sell_pct), position_mode)
             if planned <= POSITION_EPSILON:
-                return "TREND_ZONE 未卖出：已到卖出价，但机动仓可卖数量太小，无法形成有效卖出。"
-            return "TREND_ZONE 未卖出：已接近卖出条件，但本轮策略卖出数量为 0。"
+                return (
+                    "TREND_ZONE 未卖出：已到卖出价，但机动仓可卖数量太小，无法形成有效卖出"
+                    f"（每次卖出 {pct(get_trend_zone_sell_percent(cfg))} 机动仓，步长 {pct(step_pct)}）。"
+                )
+            return (
+                "TREND_ZONE 未卖出：已接近卖出条件，但本轮策略卖出数量为 0"
+                f"（每次卖出 {pct(get_trend_zone_sell_percent(cfg))} 机动仓，步长 {pct(step_pct)}）。"
+            )
 
         if zone == "CLEAR_ZONE":
             weights = get_clear_pyramid_weights(cfg)
@@ -2336,7 +2352,10 @@ def build_no_trade_reason(zone, cfg, quant_state, state_dict, current_price, ma1
                 )
             if cu <= POSITION_EPSILON:
                 return "CLEAR_ZONE 未卖出：当前已无持仓。"
-            return "CLEAR_ZONE 未卖出：已进入新的Clear区间，但本轮可卖数量为 0。"
+            return (
+                "CLEAR_ZONE 未卖出：已进入新的Clear区间，但本轮可卖数量为 0"
+                f"（应卖第 {target_step}/{total_steps} 步，已卖 {done_step}/{total_steps} 步）。"
+            )
 
         return f"{zone or 'UNKNOWN'} 未交易：当前区间没有匹配到买入或卖出规则。"
     except Exception as e:
@@ -3038,6 +3057,10 @@ def main_loop():
     while True:
         SYMBOL_CONFIG, STRATEGY_from_conf, FULL_CONFIG = load_config(config_path)
         STRATEGY.update(STRATEGY_from_conf)
+        for _stale_name in list(state.keys()):
+            if _stale_name != "_meta" and _stale_name not in SYMBOL_CONFIG and isinstance(state.get(_stale_name), dict):
+                state.pop(_stale_name, None)
+                logging.info(f"🧹 已清理已删除标的运行状态: {_stale_name}")
         last_config_reload_seq = apply_runtime_config_reload_if_needed(state, last_config_reload_seq)
         last_system_config_seq = apply_system_config_update_if_needed(state, last_system_config_seq)
         force_refresh, force_refresh_seq, force_refresh_targets = read_force_refresh_request(state)
@@ -3217,6 +3240,12 @@ def main_loop():
             logging.info(f"🔄 收到 Web 手动刷新请求 seq={force_refresh_seq}，目标={','.join(force_refresh_targets) or 'ALL'}，本轮只刷新行情/状态，不触发交易。")
             logging.info("=" * 60)
 
+        loop_enabled = str(STRATEGY.get("loop_enabled", "yes") or "yes")
+        if loop_enabled.lower() in ("no", "off", "false", "0"):
+            loop_enabled = False
+        else:
+            loop_enabled = True
+
         # 策略执行
         all_trade_msgs = []
         all_market_error_msgs = []
@@ -3228,7 +3257,7 @@ def main_loop():
             try:
                 msgs = strategy_for_quant(
                     name, cfg, state,
-                    allow_trade=not force_refresh,
+                    allow_trade=not force_refresh and loop_enabled,
                     refresh_reason="Web手动刷新，仅更新状态",
                     refresh_reference=True,
                 )
@@ -3248,6 +3277,11 @@ def main_loop():
             state.setdefault("_meta", {})["force_refresh_done_at"] = strategy_now().strftime("%Y-%m-%d %H:%M:%S")
             save_state(state)
             logging.info(f"✅ Web 手动刷新完成 seq={force_refresh_seq}，目标={','.join(force_refresh_targets) or 'ALL'}，未触发任何交易推送。")
+            sleep_until_next_loop_or_web_request(state, STRATEGY.get("loop_interval", 60))
+            continue
+
+        if not loop_enabled:
+            save_state(state)
             sleep_until_next_loop_or_web_request(state, STRATEGY.get("loop_interval", 60))
             continue
 
