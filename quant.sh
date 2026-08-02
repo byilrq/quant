@@ -1184,9 +1184,9 @@ backup_runtime_data() {
         echo -e "${C_YELLOW}备份目录 $BACKUP_DST 不存在，正在创建...${C_RESET}"
         mkdir -p "$BACKUP_DST" || { echo -e "${C_RED}❌ 无法创建备份目录${C_RESET}"; return 1; }
     fi
-    BACK_PY="$DCF_DIR/back.py"
+    BACK_PY="$DCF_DIR/backup.py"
     if [ -f "$BACK_PY" ]; then
-        "$VENV_DIR/bin/python" "$BACK_PY" || echo -e "${C_RED}❌ back.py 执行失败${C_RESET}"
+        "$VENV_DIR/bin/python" "$BACK_PY" || echo -e "${C_RED}❌ backup.py 执行失败${C_RESET}"
     else
         echo -e "${C_RED}❌ 未找到 $BACK_PY${C_RESET}"
         return 1
@@ -1206,7 +1206,7 @@ restore_from_backup() {
     echo "正在停止服务..."
     systemctl stop quant-web.service 2>/dev/null || true
     systemctl stop quant.service 2>/dev/null || true
-    BACK_PY="$DCF_DIR/back.py"
+    BACK_PY="$DCF_DIR/backup.py"
     if [ -f "$BACK_PY" ]; then
         "$VENV_DIR/bin/python" "$BACK_PY" restore || echo -e "${C_RED}❌ 重建失败${C_RESET}"
     else

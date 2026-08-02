@@ -3113,7 +3113,7 @@ def main_loop():
 
                 try:
                     import subprocess
-                    back_py = BASE_DIR / "back.py"
+                    back_py = BASE_DIR / "backup.py"
                     if back_py.exists():
                         subprocess.run([sys.executable, str(back_py)], capture_output=True, timeout=60)
                         logging.info("📦 运行数据已备份到 /mnt/rclone/quant")
