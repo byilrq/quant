@@ -1177,6 +1177,48 @@ SERVICE
     echo -e "${C_CYAN}==============================${C_RESET}"
 }
 
+backup_runtime_data() {
+    echo -e "${C_BOLD}${C_GREEN}========== 备份运行数据 ==========${C_RESET}"
+    BACKUP_DST="/mnt/rclone/quant"
+    if [ ! -d "$BACKUP_DST" ]; then
+        echo -e "${C_YELLOW}备份目录 $BACKUP_DST 不存在，正在创建...${C_RESET}"
+        mkdir -p "$BACKUP_DST" || { echo -e "${C_RED}❌ 无法创建备份目录${C_RESET}"; return 1; }
+    fi
+    BACK_PY="$DCF_DIR/back.py"
+    if [ -f "$BACK_PY" ]; then
+        "$VENV_DIR/bin/python" "$BACK_PY" || echo -e "${C_RED}❌ back.py 执行失败${C_RESET}"
+    else
+        echo -e "${C_RED}❌ 未找到 $BACK_PY${C_RESET}"
+        return 1
+    fi
+    echo -e "${C_GREEN}✅ 备份完成，数据已保存到 $BACKUP_DST${C_RESET}"
+}
+
+restore_from_backup() {
+    echo -e "${C_BOLD}${C_YELLOW}========== 从备份重建运行数据 ==========${C_RESET}"
+    echo -e "${C_RED}⚠️  此操作将覆盖当前运行数据，包括 quant.yaml、状态文件、交易记录等。${C_RESET}"
+    echo -ne "${C_BOLD}确认继续？(y/N): ${C_RESET}"
+    read -r confirm
+    if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+        echo "已取消。"
+        return 0
+    fi
+    echo "正在停止服务..."
+    systemctl stop quant-web.service 2>/dev/null || true
+    systemctl stop quant.service 2>/dev/null || true
+    BACK_PY="$DCF_DIR/back.py"
+    if [ -f "$BACK_PY" ]; then
+        "$VENV_DIR/bin/python" "$BACK_PY" restore || echo -e "${C_RED}❌ 重建失败${C_RESET}"
+    else
+        echo -e "${C_RED}❌ 未找到 $BACK_PY${C_RESET}"
+        return 1
+    fi
+    echo "正在启动服务..."
+    systemctl start quant.service 2>/dev/null || true
+    systemctl start quant-web.service 2>/dev/null || true
+    echo -e "${C_GREEN}✅ 重建完成，服务已重启${C_RESET}"
+}
+
 uninstall_quant() {
     echo -e "${C_RED}========== 卸载 Quant 程序 ==========${C_RESET}"
     echo -e "${C_YELLOW}警告：此操作将删除以下内容：${C_RESET}"
@@ -1251,6 +1293,8 @@ show_menu() {
     echo -e "${C_CYAN}4)${C_RESET} 查看运行状态"
     echo -e "${C_YELLOW}5)${C_RESET} 配置/安装网页端"
     echo -e "${C_GREEN}6)${C_RESET} 卸载程序"
+    echo -e "${C_YELLOW}7)${C_RESET} 备份运行数据"
+    echo -e "${C_YELLOW}8)${C_RESET} 从备份重建"
     echo -e "${C_RED}0)${C_RESET} 退出"
     echo -e "${C_CYAN}===============================${C_RESET}"
 }
@@ -1267,7 +1311,8 @@ case "$choice" in
     4) show_status ;;
     5) configure_web_portal ;;
     6) uninstall_quant ;;
-    7) uninstall_quant ;;
+    7) backup_runtime_data ;;
+    8) restore_from_backup ;;
     0) exit 0 ;;
     *) echo "无效选项，请重新输入。" ;;
 esac

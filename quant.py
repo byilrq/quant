@@ -49,7 +49,7 @@ LOG_DIR.mkdir(exist_ok=True)
 # ===========================
 # 数据保留策略
 # ===========================
-SNAPSHOT_RETENTION_DAYS = 30
+SNAPSHOT_RETENTION_DAYS = 7
 PUSH_LOG_KEEP_LINES = 30
 
 def prune_snapshot_files(keep_days: int = SNAPSHOT_RETENTION_DAYS):
@@ -2482,10 +2482,30 @@ def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", re
             closes_count=len(closes), source=snapshot.source, last_bar_date=snapshot.last_bar_date,
             trade_allowed=False,
         )
-        # 行情源切换首轮只监控不交易，也不更新 last_price / last_trade_price / last_add_price；WARN 不推送。
+        if int(_safe_float(quant_state.get("pending_market_source_count", 0), 0)) == 1:
+            try:
+                send_notification(
+                    f"⚠️ 行情源切换中\n"
+                    f"📌标的: {name} ({symbol})\n"
+                    f"📡{source_reason}\n"
+                    f"⏸️ 确认期间暂停交易，连续确认后自动恢复。",
+                    title=f"⚠️[SOURCE]【{name}】行情源切换"
+                )
+            except Exception:
+                pass
         return []
     elif source_reason:
         logging.warning(f"{name} {symbol}: {source_reason}，本轮继续执行行情质量检查。")
+        try:
+            send_notification(
+                f"🔄 行情源切换通知\n"
+                f"📌标的: {name} ({symbol})\n"
+                f"📡{source_reason}\n"
+                f"✅ 新源已连续确认，本轮恢复交易。",
+                title=f"🔄[SOURCE]【{name}】行情源切换"
+            )
+        except Exception:
+            pass
 
     max_jump = _safe_float(cfg.get("max_price_jump_ratio", STRATEGY.get("max_price_jump_ratio", 0.25)), 0.25)
     suspicious, jump_ratio = _is_price_jump_suspicious(current_price, last_valid_price, max_jump)
@@ -3090,6 +3110,15 @@ def main_loop():
                     logging.info("🧹 已清理旧策略缓存文件（仅保留今日）")
                 except Exception as e:
                     logging.exception(f"❌ 清理策略缓存失败: {e}")
+
+                try:
+                    import subprocess
+                    back_py = BASE_DIR / "back.py"
+                    if back_py.exists():
+                        subprocess.run([sys.executable, str(back_py)], capture_output=True, timeout=60)
+                        logging.info("📦 运行数据已备份到 /mnt/rclone/quant")
+                except Exception as e:
+                    logging.warning(f"📦 运行数据备份失败: {e}")
 
                 snapshot = build_daily_snapshot(state)
                 logging.info("=" * 60)
