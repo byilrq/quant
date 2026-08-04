@@ -17,13 +17,10 @@ BACKUP_DSTS = [Path("/root/quant/backup"), Path("/mnt/rclone/quant")]
 BACKUP_FILES = {
     "quant.yaml": "quant.yaml",
     "quant_monitor_state.json": "quant_monitor_state.json",
-    "push.conf": "push.conf",
-    "trade_log.csv": "trade_log.csv",
 }
 
 BACKUP_DIRS = {
     "data/state_backups": "state_backups",
-    "data/strategy_history": "strategy_history",
 }
 
 

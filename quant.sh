@@ -397,7 +397,6 @@ update_project_files() {
 	copy_project_file_overwrite "$srcdir/push.conf" "$DCF_DIR/push.conf"
 	copy_project_file_overwrite "$srcdir/quant.yaml" "$DCF_DIR/quant.yaml"
 	
-	market_data.py
 
     # 用户配置/运行状态：只在缺失时初始化，避免覆盖实盘参数和推送密钥
     copy_project_file_if_missing "$srcdir/quant.yaml" "$DCF_DIR/quant.yaml"
@@ -1196,7 +1195,7 @@ backup_runtime_data() {
 
 restore_from_backup() {
     echo -e "${C_BOLD}${C_YELLOW}========== 从备份重建运行数据 ==========${C_RESET}"
-    echo -e "${C_RED}⚠️  此操作将覆盖当前运行数据，包括 quant.yaml、状态文件、交易记录等。${C_RESET}"
+    echo -e "${C_RED}⚠️  此操作将覆盖当前运行数据，包括 quant.yaml、quant_monitor_state.json、交易前回滚快照。${C_RESET}"
     echo -ne "${C_BOLD}确认继续？(y/N): ${C_RESET}"
     read -r confirm
     if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
