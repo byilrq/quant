@@ -939,6 +939,33 @@
       margin-top:2px !important;
       margin-bottom:12px !important;
     }
+    .manual-trade-row{
+      display:flex;
+      align-items:center;
+      gap:16px;
+      flex-wrap:wrap;
+    }
+    .manual-trade-field{
+      display:flex;
+      align-items:center;
+      gap:6px;
+      flex:0 0 auto;
+      font-size:13px;
+      white-space:nowrap;
+    }
+    .manual-trade-field input{
+      width:110px;
+      padding:6px 8px;
+    }
+    .manual-trade-btns{
+      display:flex;
+      gap:8px;
+      margin-left:auto;
+    }
+    .manual-trade-btns .action-btn{
+      flex:0 0 auto;
+      white-space:nowrap;
+    }
 
     /* 回测页：亮色主题去掉 details 外层方框，改成轻量按钮式展开/收起 */
     body.theme-x3-light .raw-output.backtest-output-toggle,
@@ -1604,6 +1631,26 @@ body:not(.theme-x3-dark) .panel-toggle input:checked + .panel-toggle-slider{back
           <p class="snapshot-empty">暂无今日行情源统计。</p>
         {% endif %}
         </div>
+      </section>
+
+      <section class="card page-card">
+        <div class="section-header">
+          <div>
+            <h2>手动交易{% if selected_label %} - {{ selected_label }}{% endif %}</h2>
+          </div>
+        </div>
+        <form method="post" action="{{ url_for('params_page') }}" id="manual-trade-form" class="tool-form">
+          <input type="hidden" name="action" value="manual_trade">
+          <input type="hidden" name="return_to" value="status">
+          <div class="manual-trade-row">
+            <label class="manual-trade-field">成交价格 <input type="text" name="mt_price" placeholder="如 8.460"></label>
+            <label class="manual-trade-field">仓位 <input type="text" name="mt_qty" placeholder="3%/0.03"></label>
+            <div class="manual-trade-btns">
+              <button type="submit" name="mt_side" value="buy" class="primary-btn action-btn">买入</button>
+              <button type="submit" name="mt_side" value="sell" class="danger-btn action-btn">卖出</button>
+            </div>
+          </div>
+        </form>
       </section>
 
       <section class="card page-card">

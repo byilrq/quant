@@ -184,15 +184,15 @@ def get_target_units(cfg):
 def get_limit_units(cfg):
     return get_base_units(cfg) * _safe_float(cfg.get("limit_target", cfg.get("double_target_factor", 2.0)), 2.0)
 
-def normalize_strategy_run_value(value, default="off"):
-    """运行开关只允许 on/off；无效或缺失值按 default 处理，默认 off。"""
+def normalize_strategy_run_value(value, default="on"):
+    """运行开关只允许 on/off；无效或缺失值按 default 处理，默认 on。"""
     s = str(value if value is not None else "").strip().lower()
     if s in {"on", "off"}:
         return s
     return default
 
 def is_strategy_on(cfg):
-    return normalize_strategy_run_value(cfg.get("strategy_run", "off"), "off") == "on"
+    return normalize_strategy_run_value(cfg.get("strategy_run", "on"), "on") == "on"
 
 def get_trend_multiple(cfg):
     return _safe_float(cfg.get("trend_multiple", 1.2), 1.2)
@@ -285,7 +285,7 @@ def build_default_symbol_state(cfg):
         "pyramid_step": 0,
         "clear_step": 0,
         "clear_anchor_price": None,
-        "strategy_run": normalize_strategy_run_value(cfg.get("strategy_run", "off"), "off"),
+        "strategy_run": normalize_strategy_run_value(cfg.get("strategy_run", "on"), "on"),
         "position_mode": get_position_mode(cfg),
         "last_add_price": None,
         "pyramid_anchor_price": None,
@@ -312,7 +312,7 @@ def normalize_symbol_state(name, cfg, entry):
     if "avg_cost" not in entry:
         entry["avg_cost"] = 0.0
     if "strategy_run" not in entry:
-        entry["strategy_run"] = normalize_strategy_run_value(cfg.get("strategy_run", "off"), "off")
+        entry["strategy_run"] = normalize_strategy_run_value(cfg.get("strategy_run", "on"), "on")
     if "pyramid_step" not in entry:
         entry["pyramid_step"] = 0
     if "clear_step" not in entry:
@@ -1020,7 +1020,7 @@ def build_daily_snapshot(state: dict) -> str:
         quant_state = state.get(name, {})
         status = quant_state.get("last_status_msg")
         cfg = SYMBOL_CONFIG.get(name, {})
-        strategy_run = normalize_strategy_run_value(cfg.get("strategy_run", "off"), "off")
+        strategy_run = normalize_strategy_run_value(cfg.get("strategy_run", "on"), "on")
         if status:
             old_time_match = re.search(r'🕒时间:\s*(\d{4}\.\d{2}\.\d{2}\.\d{2}:\d{2})', status)
             if old_time_match:
@@ -2039,7 +2039,7 @@ def refresh_source_metrics_for_symbol(name, cfg, state):
 def build_status_message(name, symbol, now_str, zone, current_price, last_trade_price, last_trade_side,
                         current_units, current_avg_cost, ma150, ma150_source,
                         base_units, target_units, limit_units, sell_price, clear_price,
-                        position_mode="absolute", extra_info="", strategy_run="off"):
+                        position_mode="absolute", extra_info=""):
     if last_trade_side == "buy":
         side_label = "（B）"
     elif last_trade_side == "sell":
@@ -2047,9 +2047,8 @@ def build_status_message(name, symbol, now_str, zone, current_price, last_trade_
     else:
         side_label = "（B）"
     last_trade_price_msg = f"{last_trade_price:.3f}{side_label}" if last_trade_price is not None else "无"
-    status_icon = "🟢" if strategy_run == "on" else "🔴"
     msg = (
-        f"{status_icon}[INFO]【{name}】 ({symbol})\n"
+        f"🟢[INFO]【{name}】 ({symbol})\n"
         f"🕒时间: {now_str}\n"
         f"🍭区间: {zone}\n"
         f"💲当前: {current_price:.3f},上次:{last_trade_price_msg}\n"
@@ -2381,7 +2380,7 @@ def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", re
     base_units = get_base_units(cfg)
     target_units = get_target_units(cfg)
     limit_units = get_limit_units(cfg)
-    strategy_run = normalize_strategy_run_value(cfg.get("strategy_run", "off"), "off")
+    strategy_run = normalize_strategy_run_value(cfg.get("strategy_run", "on"), "on")
     quant_state = state.setdefault(name, build_default_symbol_state(cfg))
     quant_state = normalize_symbol_state(name, cfg, quant_state)
     tick = quant_state.get("tick", 0) + 1
@@ -2725,7 +2724,7 @@ def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", re
         ma150=ma150, ma150_source=ma150_source,
         base_units=base_units, target_units=target_units, limit_units=limit_units,
         sell_price=sell_price, clear_price=clear_price,
-        position_mode=position_mode, extra_info=extra_info_full, strategy_run=strategy_run
+        position_mode=position_mode, extra_info=extra_info_full
     )
     status_msg = _apply_strategy_alert_to_message(status_msg, strategy_level_for_msg, strategy_issue)
     logging.info(status_msg + "\n")
@@ -2896,7 +2895,7 @@ def strategy_for_quant(name, cfg, state, allow_trade=True, refresh_reason="", re
             quant_state["last_trade_side"] = "sell"
             last_trade_price = new_state.get("last_trade_price", last_trade_price)
             persist_runtime_position_to_config(name, current_units, current_avg_cost)
-            extra_info = f"📈趋势区卖出机动仓: {format_units_for_display(sell_qty, position_mode)}\n⏳动态K={dynamic_k150:.3f}，横盘评分={sideways_score:.2f}"
+            extra_info = f"🎯趋势区卖出机动仓: {format_units_for_display(sell_qty, position_mode)}\n⏳动态K={dynamic_k150:.3f}，横盘评分={sideways_score:.2f}"
             trade_msg = build_trade_message(
                 name=name, symbol=symbol, now_str=now_str, zone="TREND_ZONE",
                 trade_action="卖出", trade_price=current_price, trade_qty=sell_qty,
@@ -3068,7 +3067,7 @@ def main_loop():
         if not isinstance(cfg, dict):
             logging.error(f"配置项 {name} 不是字典，类型为 {type(cfg)}，已跳过。请检查 quant.yaml 格式。")
             continue
-        strategy_run = normalize_strategy_run_value(cfg.get("strategy_run", "off"), "off")
+        strategy_run = normalize_strategy_run_value(cfg.get("strategy_run", "on"), "on")
         status_icon = "🟢" if strategy_run == "on" else "🔴"
         logging.info(f" {status_icon} {name}: {strategy_run.upper()}")
     logging.info("=" * 60)

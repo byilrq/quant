@@ -853,6 +853,8 @@ def _is_strategy_decision_snapshot(record: Dict[str, Any]) -> bool:
     latest in-market TRADE/NO_TRADE state. MONITOR_ONLY is also excluded from
     the primary snapshot because it is not an executable strategy decision.
     """
+    if record.get("manual_trade"):
+        return False
     action = _snapshot_action(record)
     if action in {"REFRESH_ONLY", "MONITOR_ONLY"}:
         return False
@@ -3172,6 +3174,150 @@ def _save_all_params(config: Dict[str, Any], selected: str) -> None:
     write_yaml(config)
     request_runtime_config_reload(selected, section)
 
+def _manual_trade_format_units(value, mode):
+    if mode == "percent":
+        pct = safe_float(value, 0.0) * 100.0
+        s = f"{pct:.2f}".rstrip("0").rstrip(".")
+        if s in {"", "-0"}:
+            s = "0"
+        return f"{s}%"
+    return f"{int(round(safe_float(value, 0.0))):,}股"
+
+def _manual_trade_write_snapshot(selected, symbol, side, price, qty, units_after, cost_after, position_mode):
+    try:
+        SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+        now = datetime.now()
+        day = now.strftime("%Y-%m-%d")
+        rec = {
+            "time": now.strftime("%Y-%m-%d %H:%M:%S"),
+            "date": day,
+            "name": selected,
+            "symbol": symbol,
+            "level": "INFO",
+            "action": "TRADE",
+            "decision": "TRADE",
+            "side": side,
+            "reason": "手动交易",
+            "manual_trade": True,
+            "market_status": "ok",
+            "market_source": "",
+            "current_price": price,
+            "trade_price": price,
+            "trade_qty": qty,
+            "current_units": units_after,
+            "avg_cost": cost_after,
+            "position_mode": position_mode,
+            "zone": "MANUAL",
+        }
+        path = SNAPSHOT_DIR / f"{day}.jsonl"
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False, separators=(",", ":")) + "\n")
+    except Exception as exc:
+        logging.debug(f"记录手动交易快照失败: {exc}")
+
+def _manual_trade_log_csv(selected, symbol, side, price, qty, avg_cost_after, units_after, position_mode):
+    try:
+        file_exists = TRADE_LOG_FILE.exists()
+        with TRADE_LOG_FILE.open("a", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            if not file_exists:
+                writer.writerow(["date", "quant_name", "symbol", "action", "price", "qty",
+                                 "avg_cost_after", "zone", "reason", "raw_price", "restor_price",
+                                 "ma150", "last_trade_price_before", "last_add_price_before",
+                                 "dividend", "split_ratio"])
+            writer.writerow([
+                current_time_text(), selected, symbol, side,
+                f"{safe_float(price, 0.0):.3f}", str(safe_float(qty, 0.0)),
+                f"{safe_float(avg_cost_after, 0.0):.3f}", "MANUAL", "手动交易",
+                "", "", "", "", "", "", "",
+            ])
+    except Exception as exc:
+        logging.debug(f"记录手动交易日志失败: {exc}")
+
+def handle_manual_trade(config: Dict[str, Any], selected: str) -> Tuple[bool, str]:
+    """Execute a manual buy/sell outside the strategy and persist position/cost."""
+    if selected == "COMMON_BACKTEST_CONFIG":
+        return False, "通用回测参数不可手动交易。"
+    side = (request.form.get("mt_side", "") or "").strip().lower()
+    if side not in {"buy", "sell"}:
+        return False, "无效的交易方向。"
+    price = safe_float(request.form.get("mt_price", ""), 0.0)
+    qty = parse_runtime_position_value(request.form.get("mt_qty", ""))
+    if price <= 0:
+        return False, "请填写有效的成交价格。"
+    if qty <= 0:
+        return False, "请填写有效的仓位数量。"
+
+    section = get_section(config, selected)
+    symbol = str(section.get("symbol", "") or "").strip().upper()
+    position_mode = str(section.get("position_mode", "percent") or "percent").strip().lower()
+
+    state = read_state()
+    if not isinstance(state, dict):
+        state = {}
+    node = state.setdefault(selected, {})
+    if not isinstance(node, dict):
+        node = state[selected] = {}
+
+    cur_units = parse_runtime_position_value(node.get("current_units", section.get("current_units", 0)))
+    cur_cost = safe_float(node.get("avg_cost", section.get("current_avg_cost", 0)), 0.0)
+
+    if side == "buy":
+        new_units = cur_units + qty
+        if new_units > 0:
+            new_cost = (cur_units * cur_cost + qty * price) / new_units
+        else:
+            new_cost = price
+        side_label = "BUY"
+        action_label = "买入"
+    else:
+        new_units = max(cur_units - qty, 0.0)
+        new_cost = cur_cost if new_units > 0 else 0.0
+        side_label = "SELL"
+        action_label = "卖出"
+
+    node["current_units"] = new_units
+    node["avg_cost"] = new_cost
+    node["last_trade_price"] = price
+    node["last_trade_side"] = "buy" if side == "buy" else "sell"
+    node["last_trade_at"] = current_time_text()
+    node["manual_trade_notice"] = (
+        f"🖐️[MANUAL]【{selected}】 手动{action_label} {_manual_trade_format_units(qty, position_mode)} "
+        f"@ {price:.3f}，当前持仓 {_manual_trade_format_units(new_units, position_mode)}，成本 {new_cost:.3f}"
+    )
+    write_state(state)
+
+    section["current_units"] = _manual_trade_format_units(new_units, position_mode)
+    section["current_avg_cost"] = round(new_cost, 6) if new_cost > 0 else 0.0
+    set_section(config, selected, section)
+    write_yaml(config)
+
+    _manual_trade_log_csv(selected, symbol, side_label, price, qty, new_cost, new_units, position_mode)
+    _manual_trade_write_snapshot(selected, symbol, side_label, price, qty, new_units, new_cost, position_mode)
+    request_runtime_config_reload(selected, section)
+
+    try:
+        import threading
+        threading.Thread(
+            target=send_notification,
+            args=(
+                f"🖐️[MANUAL]【{selected}】 ({symbol})\n"
+                f"🕒时间: {current_time_text()}\n"
+                f"🗞交易: {action_label} {_manual_trade_format_units(qty, position_mode)} @ {price:.3f}\n"
+                f"⚖️持仓: {_manual_trade_format_units(new_units, position_mode)}, 成本: {new_cost:.3f}",
+            ),
+            kwargs={"title": f"🖐️[MANUAL]【{selected}】手动{action_label}"},
+            daemon=True,
+        ).start()
+    except Exception:
+        pass
+
+    return True, (
+        f"手动{action_label}成功：{selected} ({symbol}) "
+        f"{_manual_trade_format_units(qty, position_mode)} @ {price:.3f}，"
+        f"当前持仓 {_manual_trade_format_units(new_units, position_mode)}，成本 {new_cost:.3f}"
+    )
+
 def _handle_symbol_actions(config: Dict[str, Any], selected: str):
     action = request.form.get("action", "")
     if action == "set_symbol":
@@ -3356,9 +3502,14 @@ def restore_trade_state_page():
 def params_page():
     config = read_yaml()
     selected = _selected_key(config)
-    if request.method == "POST" and request.form.get("action") == "save_params":
-        _save_all_params(config, selected)
-        flash("参数已保存到 quant.yaml", "success")
+    if request.method == "POST":
+        action = request.form.get("action", "")
+        if action == "save_params":
+            _save_all_params(config, selected)
+            flash("参数已保存到 quant.yaml", "success")
+        elif action == "manual_trade":
+            ok, detail = handle_manual_trade(config, selected)
+            flash(detail, "success" if ok else "error")
     return redirect(url_for("status_page"))
 
 @app.route("/api/backtest-chart/<symbol>")
