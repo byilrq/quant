@@ -2991,7 +2991,7 @@ def analyze_total_profit() -> str:
 
 @app.before_request
 def require_login() -> Any:
-    if request.endpoint in {"login", "static", "download_artifact", "download_backtest_bundle"}:
+    if request.endpoint in {"login", "static", "download_artifact", "download_backtest_bundle", "tokenapi_update_xueqiu_cookie"}:
         return None
     if not session.get("logged_in"):
         return redirect(url_for("login"))
