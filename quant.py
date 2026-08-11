@@ -2205,7 +2205,10 @@ def build_no_trade_reason(zone, cfg, quant_state, state_dict, current_price, ma1
                     f"{units(cu)} 已达到极限仓位 {units(limit)}，不再继续加仓。"
                 )
 
-            if cu < target - POSITION_EPSILON:
+            target_reached_once = bool(state_dict.get("target_reached_once", False))
+            pyramid_step = int(state_dict.get("pyramid_step", 0) or 0)
+
+            if not target_reached_once and pyramid_step <= 0 and cu < target - POSITION_EPSILON:
                 need = normalize_position_amount(target - cu, position_mode)
                 if need <= POSITION_EPSILON:
                     return (
@@ -2218,7 +2221,6 @@ def build_no_trade_reason(zone, cfg, quant_state, state_dict, current_price, ma1
                     "但本轮买入数量为 0，请检查最小交易单位或仓位配置。"
                 )
 
-            target_reached_once = bool(state_dict.get("target_reached_once", False))
             if not target_reached_once:
                 step_pct = get_pyramid_add_step(cfg)
                 anchor = state_dict.get("last_add_price", current_price) or current_price
