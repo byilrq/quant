@@ -1234,6 +1234,24 @@ body.theme-x3-light h2,
 body:not(.theme-x3-dark) h2,
 body.theme-x3-light h3,
 body:not(.theme-x3-dark) h3,
+    .group-note{
+      margin:2px 0 10px;
+      padding:8px 10px;
+      font-size:12px;
+      line-height:1.6;
+      color:rgba(203,213,225,.75);
+      background:rgba(148,163,184,.08);
+      border-radius:6px;
+    }
+    body:not(.theme-x3-dark) .group-note{
+      color:#64748b;
+      background:rgba(148,163,184,.12);
+    }
+    .field-label-row{
+      display:flex;
+      align-items:center;
+      gap:4px;
+    }
 body.theme-x3-light .subsection-title,
 body:not(.theme-x3-dark) .subsection-title,
 body.theme-x3-light label,
@@ -1679,15 +1697,22 @@ body:not(.theme-x3-dark) .panel-toggle input:checked + .panel-toggle-slider{back
                 {% if group['title'] != '基础信息' %}
                   <div class="subsection-title">{{ group['title'] }}</div>
                 {% endif %}
+                {% if group['id'] == 'sideways' %}
+                  <div class="group-note">
+                    ① 横盘评分：对最近 N 天的 MA30 / MA60 序列做差分，方向强度 dir=｜ΣΔ｜÷Σ｜Δ｜，横盘分=1−dir（取值 0~1，越接近 1 越横盘）。综合横盘分 = (1−weight60)×横盘分(MA30) + weight60×横盘分(MA60)。<br>
+                    ② 动态 K150：动态K = min_k + (k150 − min_k) × (1 − 横盘评分)。横盘越严重，动态K越接近 min_k，MA150 下移越多。<br>
+                    ③ 最终 MA150 = 原始MA150 × 动态K。MA150 越高：CHANCE 买入门槛越高（越易触发买入）、Trend/Clear 卖出触发价越高（越难卖出），整体偏多。
+                  </div>
+                {% endif %}
                 <div class="form-grid">
                   {% for field in group['items'] %}
                     <div class="field-block readonly-block">
-                      <label>
-                        {{ field['label'] }}
+                      <div class="field-label-row">
+                        <label>{{ field['label'] }}</label>
                         {% if field['help'] %}
                           <button type="button" class="help-btn" aria-label="参数说明" onclick="toggleHelp(this)">?</button>
                         {% endif %}
-                      </label>
+                      </div>
                       {% if field['help'] %}
                         <div class="help-popover hidden">{{ field['help'] }}</div>
                       {% endif %}
