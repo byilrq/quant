@@ -1506,14 +1506,14 @@ body:not(.theme-x3-dark) .panel-toggle input:checked + .panel-toggle-slider{back
         <div class="section-header between">
           <div>
             <h2>策略快照</h2>
-            <p class="section-note">只显示今日最新一次实时策略原因；手动刷新不会覆盖真实策略判断。</p>
+            <p class="section-note">交易时段内只显示今日最新一次实时策略原因；非交易时段保留最近一次策略状态。手动刷新不会覆盖真实策略判断。</p>
           </div>
         </div>
 
         {% if latest_snapshot %}
           <div class="snapshot-reason-card">{{ latest_snapshot.get('reason', '-') }}</div>
         {% else %}
-          <p class="snapshot-empty">暂无今日实时策略状态。主程序在交易时段运行一轮后会自动生成。</p>
+          <p class="snapshot-empty">暂无策略状态。主程序在交易时段运行一轮后会自动生成。</p>
         {% endif %}
       </section>
 

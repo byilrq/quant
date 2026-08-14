@@ -865,18 +865,34 @@ def _is_strategy_decision_snapshot(record: Dict[str, Any]) -> bool:
 
 
 def get_strategy_snapshots(selected: str, symbol_code: str, day: str = "") -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
-    """Return today's latest realtime strategy decision snapshots.
+    """Return the latest realtime strategy decision snapshots.
 
-    The status card is intentionally day-scoped so yesterday's NO_TRADE/TRADE
-    does not look like the current live state after the date changes. Historical
-    trades are handled separately by get_recent_trade_snapshots().
+    In-trading-session the card is day-scoped so yesterday's NO_TRADE/TRADE
+    does not look like the current live state after the date changes. Outside
+    the session (before the first bar of the day) it falls back to the most
+    recent available day so the status is preserved instead of showing empty.
     """
     day = (day or datetime.now().strftime("%Y-%m-%d")).strip()
-    records = [normalize_snapshot_source_fields(r) for r in read_snapshot_records(day, limit=5000) if _snapshot_matches(r, selected, symbol_code)]
-    decision_records = [r for r in records if _is_strategy_decision_snapshot(r)]
-    recent = list(reversed(decision_records[-10:]))
-    latest = recent[0] if recent else {}
-    return latest, recent
+    in_session = web_in_trade_session()
+
+    def _collect(which_day: str) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+        records = [normalize_snapshot_source_fields(r) for r in read_snapshot_records(which_day, limit=5000) if _snapshot_matches(r, selected, symbol_code)]
+        decision_records = [r for r in records if _is_strategy_decision_snapshot(r)]
+        recent = list(reversed(decision_records[-10:]))
+        return (recent[0] if recent else {}), recent
+
+    latest, recent = _collect(day)
+    if latest or in_session:
+        return latest, recent
+
+    for prev_day in snapshot_dates(3650):
+        if prev_day == day:
+            continue
+        latest, recent = _collect(prev_day)
+        if latest:
+            return latest, recent
+
+    return {}, []
 
 
 def get_recent_trade_snapshots(selected: str, symbol_code: str, limit: int = 10) -> List[Dict[str, Any]]:
